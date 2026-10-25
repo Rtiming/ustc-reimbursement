@@ -415,15 +415,30 @@ class AssistantService:
         result['system_write'] = False
         return result
 
-    def guide(self, topic='start'):
+    def guide(self, topic='start', language='zh'):
+        from assistant_contract import DOCS_EN, GUIDE_LANGUAGES
         if topic not in DOCS: raise APIError('unknown_guide', 'topic须为'+','.join(DOCS))
-        portable = (PROJECT / 'data/distribution.json').is_file()
-        p = PROJECT / ('docs/用户指南.md' if portable and topic not in {'fields', 'intake', 'planning', 'standards', 'ocr'} else DOCS[topic])
-        return {'ok': True, 'topic': topic, 'path': str(p), 'text': p.read_text(encoding='utf-8'), 'system_write': False}
+        if language not in GUIDE_LANGUAGES:
+            raise APIError('unknown_language', 'language must be zh or en / 语言只支持zh或en')
+        p = PROJECT / (DOCS if language == 'zh' else DOCS_EN)[topic]
+        return {'ok': True, 'topic': topic, 'language': language, 'path': str(p), 'text': p.read_text(encoding='utf-8'), 'system_write': False}
 
     def capabilities(self, intent='materials'):
         from assistant_guidance import capabilities
         return capabilities(intent)
+
+    def register_workflow(self, case_id, request, output_dir, execute=False, expected_preview_sha256=None):
+        from workflow_registration import register
+        return register(self, case_id, request, output_dir, execute, expected_preview_sha256)
+
+    def workflow(self, case_id, phase='status', execute=False):
+        from registered_workflow import run_registered_workflow
+        return run_registered_workflow(self, case_id=case_id, phase=phase, execute=execute)
+
+    def bridge(self, action='status', execute=False, request_id=None, expected_registration_sha256=None):
+        from bridge_service import run
+        return run(action=action, execute=execute, request_id=request_id,
+                   expected_registration_sha256=expected_registration_sha256)
 
     def standards_read(self, library_root, profile_id=None):
         from reimbursement_standards import standards_read
@@ -1426,12 +1441,16 @@ class AssistantService:
                 if previous.get('operation') != 'access' or previous.get('parameters', {}).get('action') != 'new-interface' or native.get('schema') not in ['ustc-finance-session-v1','ustc-finance-background-plan-v1','ustc-finance-page-open-v2'] or native.get('case_id') != request['case_id'] or native.get('request_id') != previous.get('request_id') or native.get('old_tab_id') != previous.get('parameters', {}).get('tab_id'):
                     raise APIError('finance_session_source', '只能盘点同案正式新界面原意图/SHA回执，不重发启动')
                 return cmd+['--request-id', previous['request_id'], '--receipt', str(source)]+(['--tab-id', native['old_tab_id']] if native['old_tab_id'] is not None else [])+(['--allow-foreground-open'] if native.get('silent',True) is False else [])
-            if action not in ['check', 'ensure'] or (action == 'ensure') != execute or set(a)-{'action', 'tab_id'}:
+            if action not in ['check', 'ensure'] or (action == 'ensure') != execute or set(a)-{'action', 'tab_id', 'session_only'}:
                 raise APIError('finance_session_arguments', 'access仅check/ensure/new-interface/recover-interface；动作与execute须一致')
+            if 'session_only' in a and (action != 'ensure' or type(a['session_only']) is not bool):
+                raise APIError('finance_session_arguments', 'session_only仅用于ensure，且须为布尔值')
             cmd = [self.python, str(PROJECT/'tools/finance_access.py'), 'ensure' if execute else 'check']
             if execute:
                 cmd += ['--request-id', request['request_id'], '--output', str(output)]
-                if sys.platform == 'win32' or mac_native_enabled():
+                if a.get('session_only') is True:
+                    cmd += ['--session-only']
+                elif sys.platform == 'win32' or mac_native_enabled():
                     cmd += ['--case-id', request['case_id'], '--allow-credential-login']
                 if tab is not None: cmd += ['--keep-internal-tab']
         elif op == 'invoice_verification':

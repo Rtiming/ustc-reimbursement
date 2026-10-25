@@ -58,9 +58,12 @@ def main():
     ap.add_argument('--legacy-ae-tab-proof', action='store_true',
                     help='仅Mac后台通道遗留外案隔离：额外读取原AppleEvent完整标签属性，不切换业务通道')
     sub = ap.add_subparsers(dest='command', required=True)
-    bridge = sub.add_parser('bridge', help='Mac后台扩展主机准备、当前用户安装及只读诊断')
+    bridge = sub.add_parser('bridge', help='本机原生扩展准备、安装预览与只读诊断')
     bridge.add_argument('action', choices=['prepare','install','status','inventory','diagnose',
-                                          'finalize-normal-launcher','recover','tab-close','ping','reopen','update','new-window','relocate-frozen'])
+                                          'finalize-normal-launcher','recover','tab-close','ping','reopen','update','new-window','relocate-frozen','installation-result'])
+    bridge.add_argument('--execute', action='store_true', help='prepare/install实际执行；默认先预览')
+    bridge.add_argument('--request-id', help='Windows交互安装的稳定请求标识')
+    bridge.add_argument('--expected-registration-sha256', help='Windows安装预览返回的本机登记SHA')
     bridge.add_argument('--channel', choices=['stable','beta','dev','canary'], default='stable')
     bridge.add_argument('--python', type=batch_index_path, help='本机绝对Python解释器；不安装或下载运行时')
     bridge.add_argument('--phase', choices=['check','auto','sweep','verify'],
@@ -169,7 +172,14 @@ def main():
         from setup_reimbursement_mcp import setup
         r = setup(args.check_only, with_materials=args.with_materials, material_roots=args.material_root, with_ocr=args.with_ocr)
     elif args.command == 'bridge':
-        if args.action == 'inventory':
+        if args.action in {'status', 'inventory', 'prepare', 'install', 'installation-result'} and not args.python and args.channel == 'stable':
+            if args.phase or args.output or args.tab_id or args.window_id or args.reason:
+                ap.error('接线入口不接受财务标签或恢复参数')
+            from bridge_service import run as bridge_action
+            r = bridge_action(args.action, args.execute, args.request_id, args.expected_registration_sha256)
+        elif sys.platform == 'win32':
+            ap.error('Windows使用bridge status/prepare/install/installation-result/inventory；财务工作页由登记流程绑定')
+        elif args.action == 'inventory':
             if args.python: ap.error('inventory不接受--python')
             if args.phase or args.output or args.tab_id or args.window_id or args.reason: ap.error('inventory不接受recover参数')
             from mac_edge_bridge import inventory
@@ -244,8 +254,12 @@ def main():
                 r = {'status':capabilities,'diagnose':diagnose,
                      'finalize-normal-launcher':finalize_normal_launcher}[args.action](channel=args.channel)
             else:
-                r = {'prepare':prepare,'install':install}[args.action](channel=args.channel,
-                    python_executable=str(args.python) if args.python else None)
+                if not args.execute:
+                    r = {'ok': True, 'execute': False, 'action': args.action, 'channel': args.channel,
+                         'python': str(args.python) if args.python else None, 'system_write': False}
+                else:
+                    r = {'prepare':prepare,'install':install}[args.action](channel=args.channel,
+                        python_executable=str(args.python) if args.python else None)
     elif args.command == 'confirmation-read':
         from confirmation_workbook import read_answers
         r = read_answers(args.workbook, args.manifest, args.output)
@@ -331,7 +345,7 @@ def main():
 
 if __name__ == '__main__':
     try: raise SystemExit(main())
-    except (ValueError, OSError, KeyError, TypeError, sqlite3.Error) as e:
-        fallback = 'ledger_database_error' if isinstance(e, sqlite3.Error) else 'invalid_request'
+    except (ValueError, OSError, KeyError, TypeError, RuntimeError, sqlite3.Error) as e:
+        fallback = 'ledger_database_error' if isinstance(e, sqlite3.Error) else 'runtime_failure' if isinstance(e, RuntimeError) else 'invalid_request'
         print(json.dumps({'ok': False, 'error_code': getattr(e, 'code', fallback), 'error': str(e)}, ensure_ascii=False))
         raise SystemExit(2)

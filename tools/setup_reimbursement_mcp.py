@@ -48,7 +48,7 @@ def installed_versions(python, names, env=None):
         return {}
 
 
-def material_versions(python):
+def material_versions(python, names, env=None):
     if not python.exists():
         return {}
     probe = subprocess.run(
@@ -56,11 +56,16 @@ def material_versions(python):
             str(python),
             '-X', 'utf8', '-I',
             '-c',
-            'import json,pymupdf,PIL; from importlib.metadata import version; print(json.dumps({n:version(n) for n in ["PyMuPDF","Pillow"]}))',
+            'import json,sys,pymupdf,PIL,defusedxml,pyexpat; '
+            'from importlib.metadata import version; '
+            'sys.exit(2) if pyexpat.version_info < (2,8,5) else None; '
+            'print(json.dumps({n:version(n) for n in json.loads(sys.argv[1])}))',
+            json.dumps(list(names)),
         ],
         capture_output=True,
         text=True,
         timeout=20,
+        env=env,
     )
     if probe.returncode != 0:
         return {}
@@ -68,6 +73,29 @@ def material_versions(python):
         return json.loads(probe.stdout)
     except json.JSONDecodeError:
         return {}
+
+
+def client_configuration(python, args, project):
+    """三种客户端片段来自同一个绑定；生成与自检共用这份格式。"""
+    q = lambda value: json.dumps(value, ensure_ascii=False)
+    command = {'command': str(python), 'args': args, 'cwd': str(project)}
+    return {
+        'mcp.json': json.dumps({'mcpServers': {'ustc_reimbursement': command}}, ensure_ascii=False, indent=2) + '\n',
+        'codex.toml': '[mcp_servers.ustc_reimbursement]\ncommand = ' + q(str(python))
+                      + '\nargs = ' + q(args) + '\ncwd = ' + q(str(project)) + '\n',
+        'dsh.patch.yml': '- id: reimbursement-project\n  name: "@deepseek-ai/dsh-mcp-client"\n  config:\n'
+                         '    serverName: ustc_reimbursement\n    transport: stdio\n    command: '
+                         + q(str(python)) + '\n    args: ' + q(args) + '\n    cwd: ' + q(str(project))
+                         + '\n    toolCallTimeoutMs: 30000\n',
+    }
+
+
+def client_configuration_matches(directory, expected):
+    try:
+        return all((directory / name).read_text(encoding='utf-8') == text
+                   for name, text in expected.items())
+    except (OSError, UnicodeError):
+        return False
 
 
 def setup(check_only=False, with_materials=False, material_roots=None, with_ocr=False):
@@ -138,7 +166,7 @@ def setup(check_only=False, with_materials=False, material_roots=None, with_ocr=
                 actual_mcp = installed_versions(python, expected_mcp, env)
     materials = PROJECT / 'requirements-materials.lock.txt'
     expected_materials = locked_packages(materials)
-    installed_materials = material_versions(python)
+    installed_materials = material_versions(python, expected_materials, env)
     if with_materials and not check_only and installed_materials != expected_materials:
         subprocess.run(
             [
@@ -154,7 +182,7 @@ def setup(check_only=False, with_materials=False, material_roots=None, with_ocr=
             stdout=sys.stderr,
             env=env,
         )
-        installed_materials = material_versions(python)
+        installed_materials = material_versions(python, expected_materials, env)
         atomic_json(
             local / 'materials_install.json',
             {
@@ -236,48 +264,21 @@ def setup(check_only=False, with_materials=False, material_roots=None, with_ocr=
     args = [str(PROJECT / 'tools/reimbursement_mcp.py'), '--workspace', str(PROJECT)]
     for root in roots:
         args.extend(['--material-root', str(root)])
+    expected_configs = client_configuration(python, args, PROJECT)
     if sdk_ready and not check_only:
-        command = {'command': str(python), 'args': args, 'cwd': str(PROJECT)}
-        atomic_json(config_dir / 'mcp.json', {'mcpServers': {'ustc_reimbursement': command}})
-        q = lambda x: json.dumps(x, ensure_ascii=False)
         config_dir.mkdir(parents=True, exist_ok=True)
-        (config_dir / 'codex.toml').write_text(
-            '[mcp_servers.ustc_reimbursement]\ncommand = '
-            + q(str(python))
-            + '\nargs = '
-            + q(args)
-            + '\ncwd = '
-            + q(str(PROJECT))
-            + '\n',
-            encoding='utf-8',
-        )
-        (config_dir / 'dsh.patch.yml').write_text(
-            '- id: reimbursement-project\n  name: "@deepseek-ai/dsh-mcp-client"\n  config:\n'
-            '    serverName: ustc_reimbursement\n    transport: stdio\n    command: '
-            + q(str(python))
-            + '\n    args: '
-            + q(args)
-            + '\n    cwd: '
-            + q(str(PROJECT))
-            + '\n    toolCallTimeoutMs: 30000\n',
-            encoding='utf-8',
-        )
+        for name, text in expected_configs.items():
+            if name == 'mcp.json':
+                atomic_json(config_dir / name, json.loads(text))
+            else:
+                (config_dir / name).write_text(text, encoding='utf-8')
         source = PROJECT / 'skills/ustc-reimbursement'
         for host in ['.agents', '.dsh']:
             dest = PROJECT / host / 'skills/ustc-reimbursement'
             # 共享入口已指向正本时保留软链接；其他入口复制完整技能包。
             if dest.resolve() != source.resolve():
                 shutil.copytree(source, dest, dirs_exist_ok=True)
-    config_current = False
-    if all(Path(p).exists() for p in config_files.values()):
-        saved = json.loads((config_dir / 'mcp.json').read_text(encoding='utf-8'))['mcpServers'][
-            'ustc_reimbursement'
-        ]
-        config_current = (
-            saved.get('command') == str(python)
-            and saved.get('args') == args
-            and saved.get('cwd') == str(PROJECT)
-        )
+    config_current = client_configuration_matches(config_dir, expected_configs)
     ready = (
         sdk_ready
         and config_current

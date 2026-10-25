@@ -35,6 +35,171 @@
       }
     },
     {
+      "name": "reimbursement_bridge",
+      "description": "本机浏览器接线。先预览安装；execute需原预览登记SHA及稳定request_id。仅安装本工具扩展，不登录、不办财务。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "default": "status",
+            "enum": [
+              "status",
+              "prepare",
+              "install",
+              "installation-result",
+              "inventory"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "execute": {
+            "default": false,
+            "title": "Execute",
+            "type": "boolean"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Request Id"
+          },
+          "expected_registration_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Registration Sha256"
+          }
+        },
+        "title": "reimbursement_bridgeArguments"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "reimbursement_bridgeDictOutput",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "reimbursement_register_workflow",
+      "description": "从本机已核单据及逐案正式计划生成批次索引、授权、两类导出与登记指针。先预览再核SHA执行；不编造单号或准备回执。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "case_id": {
+            "title": "Case Id",
+            "type": "string"
+          },
+          "request": {
+            "additionalProperties": true,
+            "title": "Request",
+            "type": "object"
+          },
+          "output_dir": {
+            "title": "Output Dir",
+            "type": "string"
+          },
+          "execute": {
+            "default": false,
+            "title": "Execute",
+            "type": "boolean"
+          },
+          "expected_preview_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Preview Sha256"
+          }
+        },
+        "required": [
+          "case_id",
+          "request",
+          "output_dir"
+        ],
+        "title": "reimbursement_register_workflowArguments"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "reimbursement_register_workflowDictOutput",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "reimbursement_workflow",
+      "description": "接续已登记整批流程。先status/预览；验证码本人填。未知结果只恢复原阶段；明细PDF和列表导出分别支持。长批次可用同合同CLI并保留进程/回执。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "case_id": {
+            "title": "Case Id",
+            "type": "string"
+          },
+          "phase": {
+            "default": "status",
+            "enum": [
+              "status",
+              "fill",
+              "ready",
+              "prepare-submit",
+              "materials",
+              "approve",
+              "export-system",
+              "export-list",
+              "finish"
+            ],
+            "title": "Phase",
+            "type": "string"
+          },
+          "execute": {
+            "default": false,
+            "title": "Execute",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "case_id"
+        ],
+        "title": "reimbursement_workflowArguments"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "reimbursement_workflowDictOutput",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
       "name": "reimbursement_standards_read",
       "description": "读取material-root内规范库；不填profile_id先列专项，选定后返回规范及SHA。不能用人名自动套旧案。",
       "inputSchema": {
@@ -758,7 +923,7 @@
     },
     {
       "name": "reimbursement_guide",
-      "description": "按需取得完整输入示例及操作说明：intake收件归档、planning规范维护与批次规划、export原生PDF、windows静默桥；quickstart总入口，standards规范体系，workflow财务顺序，materials材料要求。",
+      "description": "Read task guidance in Chinese or English / 按需读取中英文说明。language只影响文档，不改变权限、案件和请求。参数正本仍为tool_catalog。",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -779,9 +944,21 @@
               "planning",
               "export",
               "windows",
-              "ocr"
+              "ocr",
+              "batch-workflow",
+              "configuration",
+              "security"
             ],
             "title": "Topic",
+            "type": "string"
+          },
+          "language": {
+            "default": "zh",
+            "enum": [
+              "zh",
+              "en"
+            ],
+            "title": "Language",
             "type": "string"
           }
         },
@@ -1575,6 +1752,18 @@
             ],
             "default": null,
             "title": "Silent"
+          },
+          "session_only": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Session Only"
           }
         },
         "required": [
@@ -3307,6 +3496,9 @@
     "reimbursement_batch_plan": {
       "method": "batch_plan"
     },
+    "reimbursement_bridge": {
+      "method": "bridge"
+    },
     "reimbursement_capabilities": {
       "method": "capabilities"
     },
@@ -3376,6 +3568,9 @@
     "reimbursement_record_invoice_verification": {
       "method": "record_invoice_verification"
     },
+    "reimbursement_register_workflow": {
+      "method": "register_workflow"
+    },
     "reimbursement_result": {
       "method": "result"
     },
@@ -3405,6 +3600,9 @@
     },
     "reimbursement_verify_invoice": {
       "method": "verify_invoice"
+    },
+    "reimbursement_workflow": {
+      "method": "workflow"
     },
     "reimbursement_scan": {
       "method": "enqueue",

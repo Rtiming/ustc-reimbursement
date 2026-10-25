@@ -41,6 +41,35 @@ def file_lock(path, *, busy_message='原任务仍持有锁，请等待原任务�
                 fcntl.flock(lock, fcntl.LOCK_UN)
 
 
+@contextmanager
+def windows_bridge_install_lock():
+    """同一用户跨源码目录/桌面会话的桥安装串行；退出即释放，不创建全局文件。"""
+    if os.name != 'nt':
+        raise RuntimeError('Windows安装锁不能在其他平台使用')
+    import ctypes
+    from ctypes import wintypes as wt
+    api = ctypes.WinDLL('kernel32', use_last_error=True)
+    api.CreateMutexW.argtypes = [ctypes.c_void_p, wt.BOOL, wt.LPCWSTR]
+    api.CreateMutexW.restype = wt.HANDLE
+    api.WaitForSingleObject.argtypes = [wt.HANDLE, wt.DWORD]
+    api.ReleaseMutex.argtypes = [wt.HANDLE]
+    api.CloseHandle.argtypes = [wt.HANDLE]
+    handle = api.CreateMutexW(None, False, 'Global\\USTC-Reimbursement-Bridge-Install-' + current_user_sid())
+    if not handle:
+        raise ctypes.WinError(ctypes.get_last_error())
+    acquired = False
+    try:
+        code = api.WaitForSingleObject(handle, 0)
+        if code not in (0, 0x80):
+            raise RuntimeError('另一个本用户桥安装仍在进行，先查原安装结果')
+        acquired = True
+        yield
+    finally:
+        if acquired:
+            api.ReleaseMutex(handle)
+        api.CloseHandle(handle)
+
+
 def background_popen_kwargs():
     if os.name == 'nt':
         return {'creationflags': subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP}

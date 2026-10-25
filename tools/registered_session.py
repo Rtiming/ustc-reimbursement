@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import time
+import uuid
 
 from assistant_api import APIError, atomic_json, read_json
 
@@ -23,9 +24,46 @@ class RegisteredSession:
         self.state_path = self.folder / 'session.json'
         self.ids = [r['case_id'] for r in read_json(index)['documents']]
 
+    def open_window(self, case, bridge):
+        """窗口创建也是有回执的原请求，未知结果不再新开一份工作页。"""
+        from native_finance_bridge import new_finance_window
+        path = self.folder / ('window-request-' + case + '.json')
+        if path.exists():
+            intent = read_json(path)
+            if intent.get('namespace') != bridge['tab_id_namespace']:
+                raise APIError('registered_original_namespace', '原开窗连接已改变；先恢复原请求，不另开工作页')
+        else:
+            intent = {'case_id': case, 'namespace': bridge['tab_id_namespace'],
+                      'request_id': uuid.uuid4().hex, 'state': 'requested'}
+            atomic_json(path, intent)
+        opened = new_finance_window(request_id=intent['request_id'])
+        atomic_json(path, {**intent, 'state': 'completed', 'result': opened})
+        # 回执保留为独立历史；只有取得明确结果才移出pending入口。
+        receipt = path.with_name('window-receipt-' + intent['request_id'] + '.json')
+        atomic_json(receipt, {**intent, 'state': 'completed', 'result': opened})
+        return {**opened, 'window_request_id': intent['request_id']}
+
+    def finish_window_request(self, case, opened):
+        path = self.folder / ('window-request-' + case + '.json')
+        if not path.exists():
+            return
+        saved = read_json(self.state_path).get('creation_receipt', {})
+        if read_json(path)['request_id'] != opened.get('window_request_id') or saved != opened:
+            raise APIError('registered_window_receipt', '开窗回执尚未绑定到持久工作页，保留原请求')
+        path.unlink()
+
+    def access_parameters(self, tab):
+        parameters = {'action': 'ensure', 'tab_id': tab}
+        if self.cfg.get('login_mode', 'session_only') == 'session_only':
+            parameters['session_only'] = True
+        return parameters
+
     def job(
         self, case, operation, parameters, label, execute=False, request_id=None, on_enqueued=None
     ):
+        if operation != 'record_result':
+            from registered_inputs import assert_definition_current
+            assert_definition_current(self.service, self.cfg)
         request_id = request_id or 'registered-' + label + '-' + str(time.time_ns())
         started = time.monotonic()
         metric = {
@@ -98,12 +136,16 @@ class RegisteredSession:
 
     def recover_frozen(self, allow_access=False):
         """迁移原文档保持原任务；不刷新页面，不重放未确认的金融动作。"""
-        from mac_edge_bridge import inventory, relocate_finance_tab
+        from native_finance_bridge import inventory, relocate_finance_tab
+        from registered_inputs import assert_definition_current
+        assert_definition_current(self.service, self.cfg)
 
         state = self.state
         if state.get('created_by_registered_workflow') is not True:
             return
         observed = inventory()
+        if state.get('namespace') != observed.get('tab_id_namespace'):
+            raise APIError('registered_original_namespace', '工作页连接身份已改变；不能迁移或唤醒旧数字标签')
         hits = [
             t
             for t in observed['tabs']
@@ -165,9 +207,9 @@ class RegisteredSession:
     def ensure(self, *, preserve_original=False):
         import sys
 
-        if sys.platform != 'darwin':
-            raise APIError('registered_platform', '当前自动设备接入仅在Mac原生桥完成实机验收')
-        from mac_edge_bridge import inventory, new_finance_window, wake_finance_tab
+        if sys.platform not in ('darwin', 'win32'):
+            raise APIError('registered_platform', '当前登记工作页只支持macOS或Windows原生桥')
+        from native_finance_bridge import inventory, new_finance_window, wake_finance_tab
 
         bridge = self.configure_backend()
         state = read_json(self.state_path) if self.state_path.exists() else {}
@@ -179,12 +221,16 @@ class RegisteredSession:
             for t in snapshot['tabs']
             if t.get('tab_id') == state.get('tab_id')
             and t.get('window_id') == state.get('window_id')
-            and t.get('path') == 'https://cwzh.ustc.edu.cn/YBX/main.jsp'
+            and t.get('path') in {
+                'https://cwzh.ustc.edu.cn/YBX/main.jsp', 'https://cwzh.ustc.edu.cn/YBX/login.html',
+                'https://cwzh.ustc.edu.cn/WFManager/home2.jsp', 'https://id.ustc.edu.cn/cas/login'
+            }
         ]
         if (
             len(existing) == 1
             and state.get('case_id') == self.case
             and state.get('created_by_registered_workflow') is True
+            and state.get('namespace') == bridge['tab_id_namespace']
         ):
             tab, window = state['tab_id'], state['window_id']
         else:
@@ -192,7 +238,7 @@ class RegisteredSession:
                 self.service.overview(case).get('unverified_write') for case in self.ids
             ):
                 raise APIError('registered_original_page', '原工作页不在，不能用新页替代未结束现场')
-            opened = new_finance_window()
+            opened = self.open_window(self.ids[0], bridge)
             tab, window = str(opened['tab_id']), str(opened['window_id'])
             state = {
                 'case_id': self.case,
@@ -200,16 +246,20 @@ class RegisteredSession:
                 'window_id': window,
                 'creation_receipt': opened,
                 'created_by_registered_workflow': True,
+                'namespace': bridge['tab_id_namespace'],
             }
             atomic_json(self.state_path, state)
+            self.finish_window_request(self.ids[0], opened)
         os.environ['REIMBURSEMENT_EDGE_WINDOW_ID'] = window
         # 冻结页先恢复原文档，避免把渲染器暂停误判成登录失效。
         self.state = state
+        if state.get('creation_receipt'):
+            self.finish_window_request(state.get('last_case_id') or self.ids[0], state['creation_receipt'])
         if len(existing) == 1 and existing[0].get('frozen') is True:
             self.recover_frozen()
             window = state['window_id']
         case = state.get('last_case_id') if state.get('last_case_id') in self.ids else self.ids[0]
-        result, body = self.job(case, 'access', {'action': 'ensure', 'tab_id': tab}, 'ensure', True)
+        result, body = self.job(case, 'access', self.access_parameters(tab), 'ensure', True)
         window = self.state['window_id']
         if body.get('state') != 'ready':
             raise APIError('registered_login', '原生登录尚未就绪，未开始财务动作')
@@ -258,10 +308,12 @@ class RegisteredSession:
 
     def configure_backend(self):
         import sys
-        from mac_edge_bridge import status
+        from native_finance_bridge import status
+        from registered_inputs import assert_definition_current
+        assert_definition_current(self.service, self.cfg)
 
-        if sys.platform != 'darwin':
-            raise APIError('registered_platform', '登记工作页当前只在Mac原生桥验收')
+        if sys.platform not in ('darwin', 'win32'):
+            raise APIError('registered_platform', '当前平台不支持登记财务工作页')
         bridge = status()
         if bridge.get('ready') is not True:
             raise APIError('registered_bridge', '本机原生桥未连接')
@@ -277,13 +329,13 @@ class RegisteredSession:
         return bridge
 
     def begin_case(self, case, force_new=False):
-        from mac_edge_bridge import status, new_finance_window, inventory, close_tab
+        from native_finance_bridge import status, new_finance_window, inventory, close_tab
 
-        self.configure_backend()
+        bridge = self.configure_backend()
         old = getattr(self, 'state', read_json(self.state_path) if self.state_path.exists() else {})
         pending = self.service.overview(case).get('unverified_write')
         if pending:
-            if old.get('last_case_id') != case:
+            if old.get('last_case_id') != case or old.get('namespace') != bridge['tab_id_namespace']:
                 raise APIError(
                     'registered_pending_page', '原写入不在当前登记工作页，仅读原job恢复，不重建现场'
                 )
@@ -296,13 +348,15 @@ class RegisteredSession:
             old.get('phase') == 'opening'
             and old.get('last_case_id') == case
             and old.get('created_by_registered_workflow') is True
+            and old.get('namespace') == bridge['tab_id_namespace']
         ):
             fresh = old['creation_receipt']
             bridge = status()
             previous_workpage = old.get('previous_workpage', {})
             self.state = old
+            self.finish_window_request(case, fresh)
         else:
-            fresh = new_finance_window()
+            fresh = self.open_window(case, bridge)
             bridge = status()
             previous_workpage = old
             provisional = {
@@ -318,13 +372,14 @@ class RegisteredSession:
                 'previous_workpage': old,
             }
             atomic_json(self.state_path, provisional)
+            self.finish_window_request(case, fresh)
             self.state = provisional
         os.environ['REIMBURSEMENT_EDGE_TAB_NAMESPACE'] = bridge['tab_id_namespace']
         os.environ['REIMBURSEMENT_EDGE_WINDOW_ID'] = str(fresh['window_id'])
         tab = str(fresh['tab_id'])
         window = str(fresh['window_id'])
         result, body = self.job(
-            case, 'access', {'action': 'ensure', 'tab_id': tab}, 'fresh-native-page', True
+            case, 'access', self.access_parameters(tab), 'fresh-native-page', True
         )
         if body.get('state') != 'ready':
             raise APIError('registered_fresh_login', '新工作页登录尚未就绪，未开始本单写入')
@@ -380,6 +435,7 @@ class RegisteredSession:
         previous = old.get('last_case_id')
         if (
             old.get('created_by_registered_workflow') is True
+            and old.get('namespace') == bridge['tab_id_namespace']
             and previous in self.ids
             and not self.service.overview(previous).get('unverified_write')
         ):

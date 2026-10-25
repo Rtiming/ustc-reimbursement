@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import hashlib
-import importlib.util
+import types
 import os
 from pathlib import Path
 import shutil
@@ -17,11 +17,13 @@ VENDOR_SHA256 = '675f6c1a1734847b4c430b0cde4f03bde6f6e85f4efa3fc26906075715a29f3
 
 def archive_core():
     path = ROOT / 'distribution/vendor/archive_file.py'
-    if path.is_symlink() or hashlib.sha256(path.read_bytes()).hexdigest() != VENDOR_SHA256:
+    raw = path.read_bytes()
+    if path.is_symlink() or hashlib.sha256(raw).hexdigest() != VENDOR_SHA256:
         raise ValueError('归档核心与冻结版本不符，停止执行')
-    spec = importlib.util.spec_from_file_location('reimbursement_archive_core', path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = types.ModuleType('reimbursement_archive_core')
+    module.__file__ = str(path)
+    # 不再二次读取源码或采用旁边的pyc；执行刚刚验SHA的同一字节。
+    exec(compile(raw, str(path), 'exec'), module.__dict__)
     if os.name == 'nt':
         module.stable_copy = windows_stable_copy
     return module

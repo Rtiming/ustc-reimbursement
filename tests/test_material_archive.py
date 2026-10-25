@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import sys
 import subprocess
+import py_compile
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -14,6 +15,22 @@ from material_archive import archive_core, windows_stable_copy
 
 
 class ArchiveAdapterTests(unittest.TestCase):
+    def test_verified_vendor_bytes_do_not_load_timestamp_matching_pyc(self):
+        import material_archive
+        expected, other = b"marker='expected'\n", b"marker='tampered'\n"
+        self.assertEqual(len(expected), len(other))
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            source = root / 'distribution/vendor/archive_file.py'
+            source.parent.mkdir(parents=True)
+            source.write_bytes(other)
+            os.utime(source, (1700000000, 1700000000))
+            py_compile.compile(str(source), doraise=True)
+            source.write_bytes(expected)
+            os.utime(source, (1700000000, 1700000000))
+            with patch.object(material_archive, 'ROOT', root), patch.object(material_archive, 'VENDOR_SHA256', hashlib.sha256(expected).hexdigest()):
+                self.assertEqual(material_archive.archive_core().marker, 'expected')
+
     def test_real_intake_loads_adapter_module_and_reads_back_original(self):
         from material_intake import execute
         script = Path(__file__).resolve().parents[1] / 'tools/material_archive.py'

@@ -1,8 +1,9 @@
 #!/bin/sh
 # 仅使用系统下载/解包工具；运行时和缓存全部落在本工具目录。
 set -eu
-REIMBURSE_INSTALL_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+REIMBURSE_INSTALL_ROOT=$(CDPATH= cd -P -- "$(dirname -- "$0")/.." && pwd -P)
 cd "$REIMBURSE_INSTALL_ROOT"
+sh tools/bootstrap_boundary.sh "$REIMBURSE_INSTALL_ROOT"
 if [ "${1:-}" = "--check" ]; then
     if [ ! -x .local/mcp-venv/bin/python ]; then
         printf '%s\n' '尚未安装；先运行 sh install.sh。自检不会联网安装。' >&2

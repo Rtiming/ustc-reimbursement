@@ -9,6 +9,8 @@ function Get-ReimbursementSha([string]$path) {
 }
 $toolRoot = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $toolRoot
+# 在下载、解包和--check执行前检查；边界脚本不执行Python或uv。
+& (Join-Path $PSScriptRoot 'bootstrap_boundary.ps1') -ToolRoot $toolRoot
 if ($args.Count -gt 0 -and $args[0] -eq '--check') {
     $python = Join-Path $toolRoot '.local\mcp-venv\Scripts\python.exe'
     if (-not (Test-Path -LiteralPath $python)) { throw '尚未安装；先运行install.cmd。自检不会联网安装。' }

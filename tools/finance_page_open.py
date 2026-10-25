@@ -12,6 +12,7 @@ from operator_support import stamp
 
 
 def _observe(record, inventory):
+    from finance_session import foreground_comparison
     before = record['before']
     old_ids = {t['tab_id'] for t in before['tabs']}
     created = record.get('native_created_tab_id')
@@ -21,8 +22,7 @@ def _observe(record, inventory):
     record.update(after=inventory, new_tab_candidates=candidates,
         new_tab_id=candidates[0]['tab_id'] if len(candidates) == 1 else None,
         creation_state='identified' if len(candidates) == 1 else 'ambiguous' if candidates else 'unknown',
-        frontmost_preserved=(before['frontmost_bundle_id'], before.get('frontmost_process_id')) ==
-            (inventory['frontmost_bundle_id'], inventory.get('frontmost_process_id')),
+        frontmost_preserved=foreground_comparison(before, inventory),
         old_active_tabs_preserved=all(windows.get(w['window_id'], {}).get('active_tab_id') == w['active_tab_id'] for w in before['windows']),
         old_finance_tabs_present=all(any(t['tab_id'] == old['tab_id'] and t['path'] == old['path'] for t in inventory['tabs']) for old in before['tabs']))
     # 没有原生创建ID时，不能将用户同期打开的唯一财务页认作本工具创建。
@@ -37,7 +37,7 @@ def _observe(record, inventory):
 
 
 def open_page(case_id, request_id, old_tab_id, output, receipt=None, wait=5, silent=True):
-    from finance_session import SESSIONS, ENTRY, EDGE_BUNDLE, native_inventory, background_tab_script, restore_foreground
+    from finance_session import SESSIONS, ENTRY, EDGE_BUNDLE, native_inventory, background_tab_script, restore_foreground, foreground_comparison
     from finance_backend import mac_native_enabled
     if mac_native_enabled():
         raise ValueError('Mac后台通道的新页生命周期尚未验收；不回退AppleEvent，不改用旧命名空间')
@@ -100,7 +100,8 @@ def open_page(case_id, request_id, old_tab_id, output, receipt=None, wait=5, sil
             after = native_inventory()
             if any(t['tab_id'] == record.get('native_created_tab_id') for t in after['tabs']) or time.monotonic() >= deadline: break
             time.sleep(.2)
-        record['foreground_change_observed'] = (before['frontmost_bundle_id'], before.get('frontmost_process_id')) != (after['frontmost_bundle_id'], after.get('frontmost_process_id'))
+        same_foreground = foreground_comparison(before, after)
+        record['foreground_change_observed'] = None if same_foreground is None else not same_foreground
         record['foreground_restoration'] = ({'state': 'not_requested_by_windows_bridge', 'requested': False}
                                             if sys.platform == 'win32' else restore_foreground(before, after))
         if record['foreground_restoration'].get('native_probe_performed'): after = native_inventory()

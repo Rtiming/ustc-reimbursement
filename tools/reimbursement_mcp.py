@@ -11,10 +11,11 @@ from mcp.server import MCPServer
 from mcp.types import ToolAnnotations
 from mcp.server.mcpserver.exceptions import ToolError, ResourceError
 from assistant_api import AssistantService, PROJECT
-from assistant_contract import CASE_PROFILES, CAPABILITY_INTENTS, DOCS
+from assistant_contract import CASE_PROFILES, CAPABILITY_INTENTS, DOCS, REGISTERED_PHASES
 CaseProfile = Literal[tuple(CASE_PROFILES)]
 CapabilityIntent = Literal[tuple(CAPABILITY_INTENTS)]
 GuideTopic = Literal[tuple(DOCS)]
+RegisteredPhase = Literal[tuple(REGISTERED_PHASES)]
 from submission import ACTIONS as SUBMISSION_ACTIONS
 SubmissionAction = Literal[tuple(SUBMISSION_ACTIONS)]
 
@@ -24,14 +25,16 @@ def expected_errors(fn):
     @wraps(fn)
     def wrapped(*args, **kwargs):
         try: return fn(*args, **kwargs)
-        except (ValueError, OSError, KeyError, TypeError) as e:
-            raise ToolError(json.dumps({'ok': False, 'error_code': getattr(e, 'code', 'invalid_input'), 'error': str(e),
+        except (ValueError, OSError, KeyError, TypeError, RuntimeError) as e:
+            fallback = 'runtime_failure' if isinstance(e, RuntimeError) else 'invalid_input'
+            raise ToolError(json.dumps({'ok': False, 'error_code': getattr(e, 'code', fallback), 'error': str(e),
                                        'next': '根据错误核对输入或读取overview/result；不要盲重试写入'}, ensure_ascii=False)) from e
     return wrapped
 
 
 def create_server(service):
-    server = MCPServer('ustc-reimbursement', version='0.1.0', instructions=(
+    from workspace_config import distribution_version
+    server = MCPServer('ustc-reimbursement', version=distribution_version(PROJECT), instructions=(
         '先reimbursement_capabilities选择任务入口，照next_action和needed_inputs继续。办理财务先cases、overview明确case_id。'
         '耗时动作返回job_id，用result查询；同一操作重连保持request_id，不换号重发。'
         'execute默认false；明确本案授权后才执行已支持写入。写入完成要独立readback和record_result。'
@@ -48,6 +51,27 @@ def create_server(service):
     def reimbursement_capabilities(intent: CapabilityIntent = 'materials') -> dict[str, Any]:
         """不知道从哪里开始先调用。材料/规范/OCR发现仅返回离线工具，不探测用户浏览器资料；财务/导出才检查正式桥接线。均不启动浏览器或改写单据。"""
         return service.capabilities(intent)
+
+    @server.tool(annotations=local, structured_output=True)
+    @expected_errors
+    def reimbursement_bridge(action: Literal['status', 'prepare', 'install', 'installation-result', 'inventory'] = 'status',
+                             execute: bool = False, request_id: str | None = None,
+                             expected_registration_sha256: str | None = None) -> dict[str, Any]:
+        """本机浏览器接线。先预览安装；execute需原预览登记SHA及稳定request_id。仅安装本工具扩展，不登录、不办财务。"""
+        return service.bridge(action, execute, request_id, expected_registration_sha256)
+
+    @server.tool(annotations=local, structured_output=True)
+    @expected_errors
+    def reimbursement_register_workflow(case_id: str, request: dict[str, Any], output_dir: str,
+                                        execute: bool = False, expected_preview_sha256: str | None = None) -> dict[str, Any]:
+        """从本机已核单据及逐案正式计划生成批次索引、授权、两类导出与登记指针。先预览再核SHA执行；不编造单号或准备回执。"""
+        return service.register_workflow(case_id, request, output_dir, execute, expected_preview_sha256)
+
+    @server.tool(annotations=live, structured_output=True)
+    @expected_errors
+    def reimbursement_workflow(case_id: str, phase: RegisteredPhase = 'status', execute: bool = False) -> dict[str, Any]:
+        """接续已登记整批流程。先status/预览；验证码本人填。未知结果只恢复原阶段；明细PDF和列表导出分别支持。长批次可用同合同CLI并保留进程/回执。"""
+        return service.workflow(case_id, phase, execute)
 
     @server.tool(annotations=read, structured_output=True)
     @expected_errors
@@ -151,9 +175,9 @@ def create_server(service):
 
     @server.tool(annotations=read, structured_output=True)
     @expected_errors
-    def reimbursement_guide(topic: GuideTopic = 'start') -> dict[str, Any]:
-        """按需取得完整输入示例及操作说明：intake收件归档、planning规范维护与批次规划、export原生PDF、windows静默桥；quickstart总入口，standards规范体系，workflow财务顺序，materials材料要求。"""
-        return service.guide(topic)
+    def reimbursement_guide(topic: GuideTopic = 'start', language: Literal['zh', 'en'] = 'zh') -> dict[str, Any]:
+        """Read task guidance in Chinese or English / 按需读取中英文说明。language只影响文档，不改变权限、案件和请求。参数正本仍为tool_catalog。"""
+        return service.guide(topic, language)
 
     @server.tool(annotations=read, structured_output=True)
     @expected_errors
@@ -235,9 +259,9 @@ def create_server(service):
 
     @server.tool(annotations=live, structured_output=True)
     @expected_errors
-    def reimbursement_access(case_id: str, request_id: str, execute: bool = False, tab_id: str | None = None, action: Literal['check', 'check-page', 'diagnose', 'ensure', 'new-interface', 'recover-interface','wake-interface'] | None = None, job_id: str | None = None, artifact_id: str | None = None, expected_userid: str | None = None, silent: bool | None = None) -> dict[str, Any]:
+    def reimbursement_access(case_id: str, request_id: str, execute: bool = False, tab_id: str | None = None, action: Literal['check', 'check-page', 'diagnose', 'ensure', 'new-interface', 'recover-interface','wake-interface'] | None = None, job_id: str | None = None, artifact_id: str | None = None, expected_userid: str | None = None, silent: bool | None = None, session_only: bool | None = None) -> dict[str, Any]:
         """财务检查与登录。new-interface须execute=true，可省略旧tab_id；silent默认true，不支持时不回退。明确silent=false允许原生短暂置前并恢复原标签。recover-interface只读同案原job/artifact，继承原开页模式，不重开。check-page需身份，diagnose只读错误页；不输出密码/Cookie。"""
-        params = {k: v for k, v in dict(tab_id=tab_id, action=action, job_id=job_id, artifact_id=artifact_id, expected_userid=expected_userid, silent=silent).items() if v is not None}
+        params = {k: v for k, v in dict(tab_id=tab_id, action=action, job_id=job_id, artifact_id=artifact_id, expected_userid=expected_userid, silent=silent, session_only=session_only).items() if v is not None}
         return service.enqueue(case_id, 'access', params, request_id, execute)
 
     @server.tool(annotations=invoice_read, structured_output=True)

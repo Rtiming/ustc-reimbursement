@@ -7,7 +7,7 @@ from pathlib import Path
 import time
 
 from assistant_api import APIError, atomic_json, read_json
-from edge_runtime import file_lock
+from platform_runtime import file_lock
 
 # 保留既有导入入口；实现与内部消费者均指向唯一owner。
 from registered_inputs import checked_reference, load_definition
@@ -89,6 +89,10 @@ def _collect_existing(session):
 
 
 def run_registered_workflow(service, *, case_id, phase='ready', execute=False, progress=None):
+    if type(execute) is not bool:
+        raise APIError('registered_execute', 'execute须为布尔值；字符串不能触发执行')
+    if phase not in REGISTERED_PHASES:
+        raise APIError('registered_phase', '未知登记工作流阶段')
     # One lease covers bootstrap, window retirement, finance and delivery. A
     # second invocation must not touch the first invocation's browser scene.
     try:
@@ -124,6 +128,8 @@ def _run_registered_workflow(service, *, case_id, phase='ready', execute=False, 
             service, case_id, cfg, index, auth, execute=execute, progress=progress
         )
     if phase == 'finish':
+        if cfg.get('registration_directory') and (not cfg.get('system_pdf_manifest') or not cfg.get('list_export_manifest')):
+            raise APIError('registered_delivery_missing', 'finish须同时登记查看明细PDF和原生列表导出；先补齐两类导出配置')
         # 在批准前核对整条链的已登记输入，避免批准后才发现导出计划缺失。
         previews = {
             stage: _run_registered_workflow(
@@ -181,6 +187,8 @@ def _run_registered_workflow(service, *, case_id, phase='ready', execute=False, 
     if phase == 'approve':
         from applicant_batch import run_applicant_batch
 
+        if not cfg.get('approval_manifest'):
+            raise APIError('registered_preparation_required', '先运行ready并取得本批逐单真实准备回执，再按原授权批准；规划文件不是准备回执')
         manifest = checked_reference(service, cfg.get('approval_manifest'))
         session = RegisteredSession(service, case_id, cfg, index, auth, progress)
         return run_applicant_batch(service, session, manifest, execute=execute, progress=progress)
@@ -285,6 +293,9 @@ def _run_registered_workflow(service, *, case_id, phase='ready', execute=False, 
         session={'window_id': session.state['window_id'], 'tab_id': session.state['tab_id']},
         requested_terminal='verified_draft' if phase == 'fill' else 'applicant_review_pending',
     )
+    if phase in ('ready', 'prepare-submit') and cfg.get('approval_plans'):
+        from workflow_approval import publish_from_preparation
+        result['approval_inputs'] = publish_from_preparation(service, case_id, cfg, definition, result)
     atomic_json(session.folder / 'current-result.json', result)
     if phase == 'ready' and cfg.get('auxiliary_bindings'):
         from material_packet_batch import run_registered_packets

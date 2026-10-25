@@ -38,6 +38,9 @@ def main():
             ('install-ocr', install + ['--with-ocr']),
             ('offline-check', install + ['--check']),
             ('regression', [str(python), '-m', 'unittest', 'discover', '-s', 'tests', '-p', 'test_*.py']),
+            ('native-bridge-contract', ['node', 'tests/test_native_bridge.cjs']),
+            ('native-exports-contract', ['node', 'tests/test_system_print.cjs']),
+            ('applicant-agreement-contract', ['node', 'tests/test_applicant_submission.cjs']),
             ('stdio-material-ocr', [str(python), 'tools/distribution_smoke.py', '--mcp', '--materials', '--ocr', '--output', str(reports / 'smoke.json')]),
         ]
         for name, command in commands:

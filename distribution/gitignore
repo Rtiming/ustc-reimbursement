@@ -6,6 +6,7 @@
 !/LICENSE
 !/NOTICE
 !/THIRD_PARTY_NOTICES.md
+!/THIRD_PARTY_NOTICES.en.md
 !/CONTRIBUTING.md
 !/SECURITY.md
 !/tests/
@@ -15,6 +16,11 @@
 /templates/activity_approval/*
 !/templates/activity_approval/README.md
 !/README.md
+!/README.en.md
+!/AGENTS.en.md
+!/CONTRIBUTING.en.md
+!/SECURITY.en.md
+!/examples/
 !/AGENTS.md
 !/MANIFEST.json
 !/assistant.py

@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 import re
 from zipfile import ZipFile
-import xml.etree.ElementTree as E
+import safe_xml as E
 
 NS='http://schemas.openxmlformats.org/spreadsheetml/2006/main'
 T=lambda name:'{'+NS+'}'+name
@@ -20,10 +20,10 @@ def normalize(source,output):
     if source.resolve()==output.resolve() or output.exists():raise ValueError('只写新的输出文件，不覆盖原件')
     changes=[];payload=[]
     with ZipFile(source) as archive:
-        styles=E.fromstring(archive.read('xl/styles.xml'))
+        styles=E.from_zip(archive, 'xl/styles.xml')
         fonts=styles.find(T('fonts'));xfs=styles.find(T('cellXfs'))
         for info in archive.infolist():
-            data=archive.read(info.filename)
+            data=E.read_zip_member(archive, info.filename)
             if re.fullmatch(r'xl/worksheets/sheet\d+\.xml',info.filename):
                 document=E.fromstring(data);columns={}
                 for c in document.iter(T('c')):

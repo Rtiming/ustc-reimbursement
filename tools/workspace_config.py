@@ -10,6 +10,11 @@ from assistant_contract import APIError, CASE_PROFILES
 INSTALLATION_SCHEMA = 'ustc-installation-v1'
 
 
+def distribution_version(root):
+    path = Path(root) / 'data/distribution.json'
+    return json.loads(path.read_text(encoding='utf-8'))['version'] if path.is_file() else '0.1.0'
+
+
 def portable_workspace(root):
     return (Path(root) / 'data/distribution.json').is_file()
 
@@ -51,6 +56,16 @@ def resolve_material_roots(root, overrides=None, *, for_setup=False):
     default = saved['material_root'] if saved else root / 'materials' if portable else root.parent
     values = overrides or [default]
     return list(dict.fromkeys(Path(value).expanduser().resolve() for value in values))
+
+
+def standards_library(root):
+    """安装绑定是规范库唯一入口；仅旧业务工作树兼容原根目录布局。"""
+    saved = read_installation(root)
+    if saved:
+        return Path(saved['library_root']).resolve()
+    if portable_workspace(root):
+        raise APIError('installation_required', '先安装并绑定自己的资料目录和规范库')
+    return Path(root).resolve() / '规范库'
 
 
 def installation_config(root, data_dir=None, profile_id=None, title=None, mode=None):

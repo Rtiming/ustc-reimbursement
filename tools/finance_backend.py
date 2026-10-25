@@ -24,27 +24,32 @@ def mac_native_enabled():
     return sys.platform == 'darwin' and backend() == 'edge_native_messaging'
 
 
-def mac_namespace():
+def native_namespace():
     value = os.environ.get(NAMESPACE_ENV, '')
     if not NM_NAMESPACE.fullmatch(value):
-        raise ValueError('Mac后台通道须传当前inventory给出的完整tab_id_namespace；不能沿用AppleEvent数字标签')
+        raise ValueError('原生通道须传当前inventory给出的完整tab_id_namespace；不能沿用其他连接的数字标签')
     return value
 
 
-def mac_target():
+def native_target():
     window = os.environ.get(WINDOW_ENV, '')
     if not re.fullmatch(r'[0-9]+', window):
-        raise ValueError('Mac后台通道须传同次inventory核实的window_id；未派发')
-    return {'tab_id_namespace': mac_namespace(), 'expected_window_id': window}
+        raise ValueError('原生通道须传同次inventory核实的window_id；未派发')
+    return {'tab_id_namespace': native_namespace(), 'expected_window_id': window}
+
+
+mac_namespace = native_namespace
+mac_target = native_target
 
 
 def transport_identity():
     selected = backend()
-    namespace = (mac_namespace() if sys.platform == 'darwin' and selected == 'edge_native_messaging'
+    bound_native = selected == 'edge_native_messaging' and (sys.platform == 'darwin' or bool(os.environ.get(NAMESPACE_ENV)))
+    namespace = (native_namespace() if bound_native
                  else 'edge-applescript' if selected == 'edge_applescript' else 'edge-native-messaging-windows')
     identity = {'backend': selected, 'tab_id_namespace': namespace, 'platform': sys.platform}
-    if sys.platform == 'darwin' and selected == 'edge_native_messaging':
-        identity['window_id'] = mac_target()['expected_window_id']
+    if bound_native:
+        identity['window_id'] = native_target()['expected_window_id']
     return identity
 
 

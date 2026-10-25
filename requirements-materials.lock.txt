@@ -1,3 +1,4 @@
 # Material processing versions verified in this project. No OCR model downloads.
 PyMuPDF==1.27.2.3
-Pillow==12.2.0
+Pillow==13.0.0
+defusedxml==0.7.1
