@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><title>报销的自动化</title><link rel="stylesheet" href="popup.css">
+<body><h1>报销的自动化</h1>
+<p>打开已登录的科大财务页面，导入案件参数，选择已在页面打开的填报环节。按工号和原生控件定位。</p>
+<button id="inspect">检查当前登录</button><button id="definitions">读取页面定义</button>
+<p><label>案件参数 <input id="caseFile" type="file" accept=".json"></label></p>
+<label>动作 <select id="action">
+<option value="status">读取当前状态</option><option value="navigate">打开填写环节</option><option value="fillBasic">基本信息</option><option value="fillFunding">经费选择</option><option value="fillExpenses">费用分摊</option><option value="fillTransfers">填写转卡</option><option value="cardQuery">查询公务卡</option><option value="cardSelect">选择公务卡</option><option value="savePayments">保存支付</option><option value="fillExplanation">补充说明</option><option value="preReview">预审人</option><option value="noContract">确认本案无合同</option><option value="audit">回读核验</option></select></label>
+<label>环节 <select id="section"><option value="basic">基本信息</option><option value="funding">经费</option><option value="expenses">分摊</option><option value="payments">支付</option><option value="explanation">说明</option></select></label>
+<label>索引/转卡起始行 <input id="index" type="number" min="0" value="0"></label>
+<label><input id="save" type="checkbox">本次按原生保存按钮保存</label>
+<button id="execute">执行所选动作</button><p id="status" role="status">参数保留在本次弹窗内。审批同意和验证码由本人操作。</p><pre id="result"></pre><script src="popup.js"></script></body></html>

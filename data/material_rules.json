@@ -1,0 +1,6 @@
+{
+  "schema_version": "0.1",
+  "configuration_status": "needs_confirmation",
+  "note": "需按本单位真实来源配置材料检查规则；空规则不能表示材料齐全。专项规划规则通过私人规范库维护。",
+  "rules": []
+}

@@ -1,0 +1,5 @@
+# Explicit optional OCR backend; normal installation does not download these models.
+rapidocr-onnxruntime==1.4.4
+onnxruntime==1.31.0
+opencv-python==5.0.0.93
+numpy==2.5.4

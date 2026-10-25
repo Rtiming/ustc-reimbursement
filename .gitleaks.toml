@@ -1,0 +1,10 @@
+title = "Public release secret scanning"
+[extend]
+useDefault = true
+
+# Native Messaging扩展的固定公开RSA密钥；仅精确值＋精确文件匹配。
+[[allowlists]]
+description = "Chrome extension identity public key, not an account credential"
+condition = "AND"
+paths = ['''^extension/manifest\.json$''']
+regexes = ['''^MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAt/muc7XM4P5r\+\+n8TNbnRgR46GKg3GWHlHzFvcO8AvzKyGKTSuQ13LSU2l9f9PV83787eoj8LhWcXHG2dDOLejfV1mF896DlI5/JXjkOn8YGLYe4zuRX9BUG5LDEvZqySt8e3GxJJBXN1CjgtS\+\+RVm22ABRnej7aitqIv3qz0wsYKTGH/aKnr3rSdhOlNb\+3T\+VZpcDeLtBc1cVxpMca/Fs75mPQFPPbp6Drx3TKGeW/OYbxJyi1MlKLQjg2ElLzRRk0TZuPELEpnxPbwF9iSsc/CPte9o3pq2WEKjZrnht1rvfgQjAh7NW41NWr/sWQs/AXjocBhyVDfXEGTlv5wIDAQAB$''']

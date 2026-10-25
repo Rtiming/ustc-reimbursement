@@ -1,0 +1,16 @@
+USTC Reimbursement Toolkit
+Copyright (C) 2026 Rtiming and contributors
+
+Original project code and documentation are licensed under the GNU Affero
+General Public License, version 3 or (at your option) any later version
+(SPDX-License-Identifier: AGPL-3.0-or-later). See LICENSE for the full text.
+
+The bundled distribution/vendor/archive_file.py is an unmodified snapshot of
+the same maintainer's artifact-authoring archive helper, included under the
+same project license. Its source identifier and SHA256 are recorded in
+distribution/dependencies.json.
+
+Third-party packages, model weights, operating systems, and external services
+retain their own licenses and terms. They are not relicensed by this notice.
+See THIRD_PARTY_NOTICES.md. This is an independent project, not an official
+university financial system or a statement of university policy.

@@ -1,0 +1,2 @@
+# Optional assistant interface. Material processing has its own requirements-materials.lock.txt.
+mcp==2.2.0

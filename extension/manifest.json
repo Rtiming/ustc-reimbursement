@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "报销的自动化：财务接入与填报",
+  "version": "0.5.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAt/muc7XM4P5r++n8TNbnRgR46GKg3GWHlHzFvcO8AvzKyGKTSuQ13LSU2l9f9PV83787eoj8LhWcXHG2dDOLejfV1mF896DlI5/JXjkOn8YGLYe4zuRX9BUG5LDEvZqySt8e3GxJJBXN1CjgtS++RVm22ABRnej7aitqIv3qz0wsYKTGH/aKnr3rSdhOlNb+3T+VZpcDeLtBc1cVxpMca/Fs75mPQFPPbp6Drx3TKGeW/OYbxJyi1MlKLQjg2ElLzRRk0TZuPELEpnxPbwF9iSsc/CPte9o3pq2WEKjZrnht1rvfgQjAh7NW41NWr/sWQs/AXjocBhyVDfXEGTlv5wIDAQAB",
+  "description": "复用当前科大财务会话，按案件参数读取和填写草稿；本人审核和验证码留给用户",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "tabs",
+    "nativeMessaging",
+    "alarms"
+  ],
+  "host_permissions": ["https://cwzh.ustc.edu.cn/*", "http://cwzh.ustc.edu.cn/*", "https://id.ustc.edu.cn/cas/login*"],
+  "background": {"service_worker": "native_bridge.js"},
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "报销助手：检查当前登录"
+  }
+}

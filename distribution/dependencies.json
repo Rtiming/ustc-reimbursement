@@ -1,0 +1,14 @@
+{
+  "schema": "ustc-distribution-dependencies-v1",
+  "archive_helper": {
+    "path": "distribution/vendor/archive_file.py",
+    "sha256": "675f6c1a1734847b4c430b0cde4f03bde6f6e85f4efa3fc26906075715a29f3c",
+    "source_owner": "artifact-authoring shared skill/scripts/archive_file.py",
+    "snapshot_date": "2026-10-24",
+    "modified": false,
+    "python_min": "3.11",
+    "license": "AGPL-3.0-or-later",
+    "copyright": "2026 Rtiming and contributors",
+    "source_commit": "150718a"
+  }
+}

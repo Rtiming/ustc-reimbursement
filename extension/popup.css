@@ -1,0 +1,5 @@
+body { width: 410px; padding: 16px; font: 14px/1.6 system-ui, sans-serif; color: #203144; }
+h1 { font-size: 20px; margin-top: 0; }
+button { padding: 8px 12px; border: 1px solid #405b78; border-radius: 5px; background: #f3f7fb; margin: 0 4px 8px 0; cursor: pointer; }
+button:disabled { opacity: .5; cursor: wait; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 420px; overflow: auto; font-size: 12px; }

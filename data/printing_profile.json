@@ -1,0 +1,38 @@
+{
+  "profile_version": 3,
+  "user_confirmed_date": "2026-10-08",
+  "simplex": true,
+  "one_material_per_page": true,
+  "show_material_labels": false,
+  "show_headers": false,
+  "show_footers": false,
+  "page_size_pt": [
+    595.276,
+    841.89
+  ],
+  "margin_pt": 28.35,
+  "header_bottom_pt": 65,
+  "footer_top_pt": 808,
+  "gap_pt": 13,
+  "font": "china-s",
+  "title_size_pt": 15,
+  "body_size_pt": 11,
+  "label_size_pt": 9,
+  "footer_size_pt": 8,
+  "original_slot_height_pt": 225,
+  "source_max_width_pt": 480,
+  "raster_dpi_for_unembedded_fonts": 300,
+  "order": [
+    "正式报销单信息面",
+    "需签字的特殊材料",
+    "活动审批材料",
+    "按人整理的长途交通",
+    "按垫付人整理的打车",
+    "按酒店整理的住宿",
+    "餐饮",
+    "教具及其他费用"
+  ],
+  "ordinary_explanation_location": "优先放报销单补充说明及适用专用字段，随单审批；不默认另印重复说明",
+  "signature_scope": "单内说明须实际随单完成审批；财务明确要求独立签字时仍提供对应签字材料",
+  "auto_orientation": true
+}

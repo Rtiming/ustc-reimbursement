@@ -1,0 +1,3 @@
+# Material processing versions verified in this project. No OCR model downloads.
+PyMuPDF==1.27.2.3
+Pillow==12.2.0
