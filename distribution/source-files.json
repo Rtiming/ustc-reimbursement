@@ -59,6 +59,7 @@
     "tests/test_material_ocr.py",
     "tests/test_ocr_runtime.py",
     "tests/test_portable_install.py",
+    "tests/test_private_permissions.py",
     "tests/test_public_delivery.py",
     "tests/test_remote_material_ocr.py",
     "tests/test_standard_composition.py",

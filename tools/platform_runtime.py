@@ -115,6 +115,10 @@ def _security_api():
         'SetFileSecurityW': ([wt.LPCWSTR, wt.DWORD, ctypes.c_void_p], wt.BOOL),
         'GetFileSecurityW': ([wt.LPCWSTR, wt.DWORD, ctypes.c_void_p, wt.DWORD, ctypes.POINTER(wt.DWORD)], wt.BOOL),
         'ConvertSecurityDescriptorToStringSecurityDescriptorW': ([ctypes.c_void_p, wt.DWORD, wt.DWORD, ctypes.POINTER(wt.LPWSTR), ctypes.c_void_p], wt.BOOL),
+        'GetSecurityDescriptorControl': ([ctypes.c_void_p, ctypes.POINTER(wt.WORD), ctypes.POINTER(wt.DWORD)], wt.BOOL),
+        'GetSecurityDescriptorDacl': ([ctypes.c_void_p, ctypes.POINTER(wt.BOOL), ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(wt.BOOL)], wt.BOOL),
+        'GetAclInformation': ([ctypes.c_void_p, ctypes.c_void_p, wt.DWORD, ctypes.c_int], wt.BOOL),
+        'GetAce': ([ctypes.c_void_p, wt.DWORD, ctypes.POINTER(ctypes.c_void_p)], wt.BOOL),
     }
     for name, (args, result) in signatures.items():
         getattr(adv, name).argtypes = args
@@ -193,13 +197,52 @@ def is_private_path(path):
     buf = ctypes.create_string_buffer(size.value)
     if not adv.GetFileSecurityW(str(path.resolve()), 4, buf, size, ctypes.byref(size)):
         raise ctypes.WinError(ctypes.get_last_error())
-    text = wt.LPWSTR()
-    if not adv.ConvertSecurityDescriptorToStringSecurityDescriptorW(buf, 1, 4, ctypes.byref(text), None):
+    # Windows会规范化SDDL中的SID别名、ACE顺序和自动继承标记；比较实际权限而非显示字符串。
+    control, revision = wt.WORD(), wt.DWORD()
+    if not adv.GetSecurityDescriptorControl(buf, ctypes.byref(control), ctypes.byref(revision)):
         raise ctypes.WinError(ctypes.get_last_error())
-    try:
-        return text.value == _expected_dacl(path)
-    finally:
-        kernel.LocalFree(text)
+    present, defaulted, acl = wt.BOOL(), wt.BOOL(), ctypes.c_void_p()
+    if not adv.GetSecurityDescriptorDacl(buf, ctypes.byref(present), ctypes.byref(acl), ctypes.byref(defaulted)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    if not present.value or not acl.value:
+        return False
+
+    class AclSize(ctypes.Structure):
+        _fields_ = [('count', wt.DWORD), ('used', wt.DWORD), ('free', wt.DWORD)]
+
+    class AllowedAce(ctypes.Structure):
+        _fields_ = [('type', wt.BYTE), ('flags', wt.BYTE), ('size', wt.WORD), ('mask', wt.DWORD), ('sid_start', wt.DWORD)]
+
+    info = AclSize()
+    if not adv.GetAclInformation(acl, ctypes.byref(info), ctypes.sizeof(info), 2):
+        raise ctypes.WinError(ctypes.get_last_error())
+    if info.count != 3:
+        return False
+    entries = []
+    for index in range(info.count):
+        pointer = ctypes.c_void_p()
+        if not adv.GetAce(acl, index, ctypes.byref(pointer)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        ace = ctypes.cast(pointer, ctypes.POINTER(AllowedAce)).contents
+        if ace.type != 0 or ace.size < 20:
+            return False
+        sid = wt.LPWSTR()
+        if not adv.ConvertSidToStringSidW(ctypes.c_void_p(pointer.value + AllowedAce.sid_start.offset), ctypes.byref(sid)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            entries.append((ace.type, ace.flags, ace.mask, sid.value))
+        finally:
+            kernel.LocalFree(sid)
+    return _private_acl_matches(control.value, entries, current_user_sid(), path.is_dir())
+
+
+def _private_acl_matches(control, entries, user_sid, is_directory):
+    """只接受受保护DACL内当前用户、SYSTEM、Administrators三条完整权限，不放宽给其他主体。"""
+    if not control & 0x1000 or len(entries) != 3:
+        return False
+    flags = 3 if is_directory else 0
+    expected = {(0, flags, 0x1f01ff, sid) for sid in (user_sid, 'S-1-5-18', 'S-1-5-32-544')}
+    return len(expected) == 3 and set(entries) == expected
 
 
 class WindowsJob:
