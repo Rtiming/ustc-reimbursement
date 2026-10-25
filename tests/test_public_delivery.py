@@ -10,9 +10,16 @@ sys.path.insert(0, str(ROOT / 'tools'))
 from build_distribution import collect_sources
 from distribution_smoke import verify_members
 from prepare_public_checkout import prepare
+from assistant_contract import DOCS
 
 
 class PublicDeliveryTests(unittest.TestCase):
+    def test_all_agent_guides_are_in_public_package(self):
+        members = collect_sources(ROOT)
+        for topic, path in DOCS.items():
+            self.assertIn(path, members, topic)
+            self.assertGreater(len(members[path]), 100, topic)
+
     def test_checkout_alias_sync_and_verification_are_explicit(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
