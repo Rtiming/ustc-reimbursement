@@ -62,22 +62,45 @@ class PlatformRuntimeTests(unittest.TestCase):
 
     @unittest.skipUnless(os.name == 'nt', 'Windows内核Job验收')
     def test_owned_command_closes_detached_descendant(self):
+        import ctypes
+        from ctypes import wintypes as wt
+        api = ctypes.WinDLL('kernel32', use_last_error=True)
+        api.OpenProcess.argtypes = [wt.DWORD, wt.BOOL, wt.DWORD]
+        api.OpenProcess.restype = wt.HANDLE
+        api.IsProcessInJob.argtypes = [wt.HANDLE, wt.HANDLE, ctypes.POINTER(wt.BOOL)]
+        api.WaitForSingleObject.argtypes = [wt.HANDLE, wt.DWORD]
+        api.GetExitCodeProcess.argtypes = [wt.HANDLE, ctypes.POINTER(wt.DWORD)]
+        api.CloseHandle.argtypes = [wt.HANDLE]
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)/'child.json'
             code = "import os,subprocess,sys,time,json; p=subprocess.Popen([sys.executable,'-c','import time;time.sleep(30)'],creationflags=subprocess.CREATE_NEW_PROCESS_GROUP);open(sys.argv[1],'w').write(json.dumps(p.pid));time.sleep(30)"
             with (Path(directory)/'log').open('w') as log:
                 process, owner = platform_runtime.start_command([sys.executable, '-c', code, str(path)], cwd=directory, env=os.environ.copy(), stdout=log, stderr=log)
+                handle = None
                 try:
                     deadline = time.monotonic()+5
                     while not path.exists() and time.monotonic()<deadline:
                         time.sleep(.03)
                     child_pid = json.loads(path.read_text())
                     self.assertTrue(platform_runtime.process_alive(child_pid))
+                    handle = api.OpenProcess(0x100000 | 0x1000, False, child_pid)
+                    self.assertTrue(handle)
+                    belongs = wt.BOOL()
+                    self.assertTrue(api.IsProcessInJob(handle, owner.handle, ctypes.byref(belongs)))
+                    self.assertTrue(belongs.value)
                 finally:
                     result = owner.close()
                     process.wait(timeout=5)
-                self.assertTrue(result['ok'])
-                self.assertFalse(platform_runtime.process_alive(child_pid))
+                try:
+                    self.assertTrue(result['ok'])
+                    # 终止异步完成，且PID可能重用；等待原进程句柄并核对Job的退出码。
+                    self.assertEqual(api.WaitForSingleObject(handle, 5000), 0)
+                    code = wt.DWORD()
+                    self.assertTrue(api.GetExitCodeProcess(handle, ctypes.byref(code)))
+                    self.assertEqual(code.value, 124)
+                finally:
+                    if handle:
+                        api.CloseHandle(handle)
 
     @unittest.skipUnless(sys.platform in ['darwin', 'win32'], '支持平台OS实锁')
     def test_browser_lock_is_os_owned_and_not_reentrant(self):
