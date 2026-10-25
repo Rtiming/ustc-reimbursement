@@ -39,7 +39,8 @@ class ArchiveAdapterTests(unittest.TestCase):
     def test_snapshot_uses_original_core_and_never_overwrites(self):
         core = archive_core()
         with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
+            # Windows临时目录可能使用8.3短名；正式归档入口也先取批准的规范路径。
+            root = Path(temp).resolve()
             for n in range(12):
                 source, target = root / ('原件%d.bin' % n), root / ('copy%d.bin' % n)
                 data = bytes(range(256)) * (n + 1)
@@ -55,7 +56,8 @@ class ArchiveAdapterTests(unittest.TestCase):
         import material_archive
         original = material_archive.shutil.copyfileobj
         with tempfile.TemporaryDirectory() as temp:
-            source, target = Path(temp) / '原件.txt', Path(temp) / 'copy.txt'
+            root = Path(temp).resolve()
+            source, target = root / '原件.txt', root / 'copy.txt'
             source.write_bytes(b'unchanged source')
 
             def checked_copy(src, dst):
