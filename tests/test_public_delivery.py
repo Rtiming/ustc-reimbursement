@@ -2,6 +2,8 @@
 
 from pathlib import Path
 import sys
+import json
+import subprocess
 import tempfile
 import unittest
 
@@ -41,6 +43,13 @@ class PublicDeliveryTests(unittest.TestCase):
             self.assertIn('README.md', prepare(root, execute=True)['changed'])
             self.assertEqual(prepare(root)['changed'], [])
             self.assertEqual(verify_members(root)['verification_mode'], 'current_git_checkout')
+            output = root / '.local/isolated-smoke.json'
+            process = subprocess.run(
+                [sys.executable, '-X', 'utf8', '-I', str(root / 'tools/distribution_smoke.py'), '--output', str(output)],
+                capture_output=True, text=True, encoding='utf-8', timeout=45,
+            )
+            self.assertEqual(process.returncode, 0, process.stdout + process.stderr)
+            self.assertTrue(json.loads(output.read_text(encoding='utf-8'))['ok'])
 
     def test_private_workspace_cannot_be_overwritten(self):
         with tempfile.TemporaryDirectory() as temp:
