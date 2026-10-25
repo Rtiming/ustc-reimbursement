@@ -19,7 +19,7 @@ def configure_bundled_archive(workspace, *, package_root=PROJECT, check_only=Fal
     package_root, workspace = Path(package_root), Path(workspace)
     metadata = package_root / 'distribution/dependencies.json'
     config = read_json(metadata)['archive_helper']
-    if config.get('path') != 'distribution/vendor/archive_file.py':
+    if config.get('path') != 'tools/material_archive.py':
         raise APIError('archive_dependency_path', '分发归档依赖位置不同，先核对版本')
     helper_path = package_root.resolve() / config['path']
     reject_links(helper_path)

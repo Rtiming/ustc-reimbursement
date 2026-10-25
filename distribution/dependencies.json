@@ -1,6 +1,15 @@
 {
   "schema": "ustc-distribution-dependencies-v1",
   "archive_helper": {
+    "path": "tools/material_archive.py",
+    "sha256": "fabf5024156520ba81588f03a1b10cd9d708f39573a9abbcec7ed7351c758d49",
+    "source_owner": "project material archive adapter",
+    "snapshot_date": "2026-10-25",
+    "python_min": "3.11",
+    "license": "AGPL-3.0-or-later",
+    "delegates_to": "vendor_snapshot; Windows source IO uses tools/windows_source_io.py"
+  },
+  "vendor_snapshot": {
     "path": "distribution/vendor/archive_file.py",
     "sha256": "675f6c1a1734847b4c430b0cde4f03bde6f6e85f4efa3fc26906075715a29f3c",
     "source_owner": "artifact-authoring shared skill/scripts/archive_file.py",

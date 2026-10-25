@@ -119,9 +119,10 @@ def collect_sources(root=ROOT):
         if source not in members:
             raise ValueError('缺少分发版入口：' + source)
         members[target] = members[source]
-    dependency = json.loads(members['distribution/dependencies.json'])['archive_helper']
-    if digest(members[dependency['path']]) != dependency['sha256']:
-        raise ValueError('分发归档依赖与冻结SHA不同，先核对共享owner')
+    dependencies = json.loads(members['distribution/dependencies.json'])
+    for dependency in (dependencies['archive_helper'], dependencies.get('vendor_snapshot')):
+        if dependency and digest(members[dependency['path']]) != dependency['sha256']:
+            raise ValueError('分发归档依赖与冻结SHA不同，先核对共享owner')
     return members
 
 
