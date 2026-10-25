@@ -19,10 +19,10 @@ if ($stateEntries.Count -eq 1) {
     $pending.Push($stateRoot)
     while ($pending.Count -gt 0) {
         $item = Get-Item -LiteralPath $pending.Pop() -Force
-        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Runtime reparse point is not allowed / 运行目录不能含重解析点；保留原状' }
+        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw ('Runtime reparse point is not allowed / 运行目录不能含重解析点；保留原状: ' + $item.FullName + ' -> ' + ($item.Target -join ', ')) }
         if ($item.PSIsContainer) {
             foreach ($child in Get-ChildItem -LiteralPath $item.FullName -Force) {
-                if (($child.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Runtime reparse point is not allowed / 运行目录不能含重解析点；保留原状' }
+                if (($child.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw ('Runtime reparse point is not allowed / 运行目录不能含重解析点；保留原状: ' + $child.FullName + ' -> ' + ($child.Target -join ', ')) }
                 if ($child.PSIsContainer) { $pending.Push($child.FullName) }
             }
         } elseif ($item.FullName -eq $stateRoot) { throw '.local must be a directory / .local须为目录' }
