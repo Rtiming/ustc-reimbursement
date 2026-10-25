@@ -4,7 +4,7 @@
 
 A local reimbursement assistant for people and AI agents: document intake and archiving, PDF/OCR, sourced policy profiles, CLI/JSON, and stdio MCP. The browser adapter targets the University of Science and Technology of China (USTC). This is an independent project, not an official university service.
 
-This branch is a **0.5 development candidate**, not a published release. Windows live finance acceptance is deferred. The published 0.4 prerelease does not contain this branch's new interfaces or security fixes. Historical test results do not certify the candidate.
+This is **0.5.0-beta.1**, a prerelease for isolated installation, document handling and interface evaluation. See the [bilingual release notes](docs/releases/v0.5.0-beta.1.md). **The real Windows finance workflow has not been tested.** Live approval, portal exports and the five-minute batch target are not certified. Existing 0.4 installations do not receive these security fixes automatically.
 
 ## Install
 
@@ -48,7 +48,7 @@ Save the request and run `sh tools/reimbursement.sh call --input /absolute/path/
 | Local OCR | Explicit `--with-ocr`; recognized fields remain candidates |
 | Remote OCR / ledger | A separately configured provider; the maintainer's infrastructure is not bundled |
 | USTC finance browser | Local Edge setup, the user's own account, case-specific authorization and readback |
-| Registered batch workflow | Shared macOS/Windows candidate implementation; Windows live acceptance remains pending |
+| Registered batch workflow | Shared macOS/Windows test implementation; real Windows finance remains untested |
 | Linux finance browser | Unsupported |
 | Mobile capture / authored spreadsheets | Optional external adapters and runtimes |
 

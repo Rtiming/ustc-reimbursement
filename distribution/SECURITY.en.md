@@ -10,6 +10,6 @@ The trust boundary is a local, trusted operator and installed code/runtime/confi
 
 Unknown finance actions retain their original tasks. Verification codes remain manual. OCR and planning output remain candidates. Browser setup, login, saved values, approval and payment are separate acceptance states.
 
-The candidate has a dated [security review record](docs/en/security-review.md). Dependency checks report known advisories at query time, not all possible flaws. Static scan findings need manual interpretation. The previously published 0.4 package is unchanged by candidate fixes; do not assume an old installation has been patched.
+This prerelease has a dated [security review record](docs/en/security-review.md). Dependency checks report known advisories at query time, not all possible flaws. Static scan findings need manual interpretation. The previously published 0.4 package is unchanged by fixes in 0.5.0-beta.1; do not assume an old installation has been patched.
 
 Windows live finance acceptance is currently deferred. A CI pass or a security review does not certify that deferred workflow. Network service wrappers require separate authentication, isolation, audit, deployment validation and applicable license compliance.

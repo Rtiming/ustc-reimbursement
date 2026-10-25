@@ -23,6 +23,6 @@ Public source/history are scanned with gitleaks redaction. The extension identit
 
 The local operator, installed code/runtime and configuration are trusted; materials may be untrusted. A matching hash does not establish trust in arbitrary operator-selected code. This is not a sandbox against a compromised local administrator or a qualified multi-user network service.
 
-Preview and execution remain separate, with boolean execution flags and source/version checks. Unknown outcomes retain original work. Verification codes stay manual and window display is explicit. Windows live setup/login/code continuation/approval/native exports remain deferred; the candidate stays in a draft branch without a new release.
+Preview and execution remain separate, with boolean execution flags and source/version checks. Unknown outcomes retain original work. Verification codes stay manual and window display is explicit. Windows live setup/login/code continuation/approval/native exports remain deferred; the fixes are included in the 0.5.0-beta.1 prerelease. Prerelease publication does not change the untested live-finance status.
 
 Sources: [pip-audit](https://github.com/pypa/pip-audit), [Python XML security](https://docs.python.org/3/library/xml.html#xml-vulnerabilities), [Pillow 13.0](https://pillow.readthedocs.io/en/stable/releasenotes/13.0.0.html), [OpenTelemetry 1.45.1](https://github.com/open-telemetry/opentelemetry-python/releases/tag/v1.45.1).

@@ -2,7 +2,7 @@
 
 [中文](../整批流程与登记.md) | [English](batch-workflow.md)
 
-The 0.5 candidate shares native workpage, identity and recovery contracts across macOS and Windows. Windows live finance acceptance is deferred. Linux supports offline work only. Do not use synthetic checks as evidence of live approval.
+The 0.5.0-beta.1 prerelease shares native workpage, identity and recovery contracts across macOS and Windows. Windows live finance acceptance is deferred. Linux supports offline work only. Do not use synthetic checks as evidence of live approval.
 
 ## Browser setup
 

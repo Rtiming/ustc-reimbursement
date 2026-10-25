@@ -4,7 +4,7 @@
 
 Check the [Actions run](https://github.com/Rtiming/ustc-reimbursement/actions) for the exact commit. A workflow file or an uploaded archive alone is not a passing result.
 
-The candidate's isolated matrix covers macOS ARM64, Linux x86_64 and Windows AMD64: build a ZIP, extract into a new Unicode/space-containing path, install an independent runtime, run self-checks, Python regression, Node contracts, actual stdio MCP, synthetic intake and CPU OCR. Windows-only native-process and permission tests are explicit skips on other systems.
+The prerelease's isolated matrix covers macOS ARM64, Linux x86_64 and Windows AMD64: build a ZIP, extract into a new Unicode/space-containing path, install an independent runtime, run self-checks, Python regression, Node contracts, actual stdio MCP, synthetic intake and CPU OCR. Windows-only native-process and permission tests are explicit skips on other systems.
 
 An independent AI has made actual CLI/JSON and stdio MCP calls on synthetic local workspaces, including registration preview/save and negative input cases. This does not certify every AI client's configuration UI or a fresh physical Windows deployment.
 

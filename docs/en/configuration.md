@@ -2,7 +2,7 @@
 
 [中文](../配置说明.md) | [English](configuration.md)
 
-This page describes the 0.5 candidate. Windows live finance acceptance is deferred. Language selection changes guidance only, not permissions, business fields, or rules.
+This page describes the 0.5.0-beta.1 prerelease. Windows live finance acceptance is deferred. Language selection changes guidance only, not permissions, business fields, or rules.
 
 | Setting | Interface | Default / boundary |
 | --- | --- | --- |

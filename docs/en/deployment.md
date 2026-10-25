@@ -10,7 +10,7 @@ Use a release attachment for routine installation and a Git checkout for develop
 | Windows | x64, ARM64 | Windows PowerShell, .NET ZIP/cryptography support, permitted script execution |
 | Linux | x86_64, aarch64 | sh, curl, unzip, awk, SHA256 utility; glibc distribution |
 
-A bootstrap target is not proof that every architecture has been tested. See [validation](validation.md). Windows ARM64, macOS Intel, Linux ARM64, and Alpine/musl are not covered by the candidate's current CI matrix. Package wheel availability can further restrict optional OCR.
+A bootstrap target is not proof that every architecture has been tested. See [validation](validation.md). Windows ARM64, macOS Intel, Linux ARM64, and Alpine/musl are not covered by the prerelease's current CI matrix. Package wheel availability can further restrict optional OCR.
 
 On a minimal Debian/Ubuntu system, ask its administrator to provide `curl`, `unzip`, `ca-certificates`, and, for OpenCV/OCR, `libgl1` and the distribution's glib runtime package (`libglib2.0-0` or its `t64` replacement). The installer does not bypass operating-system policy.
 
