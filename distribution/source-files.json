@@ -54,6 +54,7 @@
     "requirements-ocr.in",
     "requirements-ocr.lock.txt",
     "tests/test_assistant_contract.py",
+    "tests/test_assistant_worker_launch.py",
     "tests/test_distribution.py",
     "tests/test_local_file_lock.py",
     "tests/test_material_ocr.py",

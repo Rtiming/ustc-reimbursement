@@ -83,6 +83,9 @@ def private_environment(root, *, create_temp=True):
     """安装与自检只继承系统运行项；财务任务的显式浏览器绑定由其原owner管理。"""
     root = Path(root)
     keys = ('PATH', 'SystemRoot', 'WINDIR', 'COMSPEC', 'TEMP', 'TMP', 'TMPDIR', 'LANG', 'LC_ALL')
+    if os.name == 'nt':
+        # Windows系统组件需要当前接收者的系统目录变量；仍不继承Python、pip或客户端配置。
+        keys += ('SystemDrive', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'PROGRAMDATA')
     result = {key: os.environ[key] for key in keys if key in os.environ}
     temporary = root / '.local/tmp'
     if create_temp:

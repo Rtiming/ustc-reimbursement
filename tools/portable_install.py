@@ -131,7 +131,7 @@ def checks(root, config, folder, *, ocr_smoke=False):
                     env=private_environment(root),
                     stdout=log,
                     stderr=subprocess.STDOUT,
-                    timeout=120,
+                    timeout=240,
                 )
             if process.returncode or not output.exists():
                 raise ValueError('正式接口演练失败，请查看同目录smoke.log')

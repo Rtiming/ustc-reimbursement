@@ -37,14 +37,26 @@ class DetachedWorker:
 _WMI_LAUNCH = r"""
 $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
+$stage='system_modules'
+try {
+# 只从本机Windows PowerShell读取系统模块，避免继承其他客户端的PSModulePath。
+Import-Module (Join-Path $PSHOME 'Modules/Microsoft.PowerShell.Utility/Microsoft.PowerShell.Utility.psd1') -ErrorAction Stop
+Import-Module (Join-Path $PSHOME 'Modules/CimCmdlets/CimCmdlets.psd1') -ErrorAction Stop
+$stage='input'
 $p=[Console]::In.ReadToEnd() | ConvertFrom-Json
+$stage='startup'
 $startup=New-CimInstance -Namespace root/cimv2 -ClassName Win32_ProcessStartup -ClientOnly -Property @{
  ShowWindow=[uint16]0; CreateFlags=[uint32]0x09000200; EnvironmentVariables=[string[]]$p.environment
 }
+$stage='dispatch'
 $r=Invoke-CimMethod -Namespace root/cimv2 -ClassName Win32_Process -MethodName Create -Arguments @{
  CommandLine=[string]$p.command_line; CurrentDirectory=[string]$p.cwd; ProcessStartupInformation=$startup
 }
 [ordered]@{return_value=[int]$r.ReturnValue;pid=[int]$r.ProcessId} | ConvertTo-Json -Compress
+} catch {
+ [ordered]@{launcher_error=$true;stage=$stage;error_type=$_.Exception.GetType().FullName} | ConvertTo-Json -Compress
+ exit 1
+}
 """
 
 
@@ -70,12 +82,14 @@ def launch_worker(python, request_file, *, cwd):
     try:
         process = subprocess.run([str(powershell), '-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
             input=json.dumps(payload, ensure_ascii=True).encode('ascii'), capture_output=True,
-            timeout=20, **background_popen_kwargs())
+            timeout=60, **background_popen_kwargs())
         result = json.loads(process.stdout)
         if process.returncode or not isinstance(result, dict) or type(result.get('return_value')) is not int:
-            raise WorkerLaunchUnknown('Windows后台启动结果未知；只检查原任务')
+            detail = ':'.join(str(result.get(k, 'unknown')) for k in ('stage', 'error_type')) if isinstance(result, dict) else 'invalid_response'
+            detail = re.sub(r'[^A-Za-z0-9_.:]', '', detail)[:160]
+            raise WorkerLaunchUnknown('Windows后台启动结果未知（'+detail+'）；只检查原任务')
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
-        raise WorkerLaunchUnknown('Windows后台启动结果未知；只检查原任务') from None
+        raise WorkerLaunchUnknown('Windows后台启动结果未知（'+type(exc).__name__+'）；只检查原任务') from None
     if result['return_value'] != 0:
         raise RuntimeError('Windows后台启动已拒绝，代码'+str(result['return_value']))
     if type(result.get('pid')) is not int or result['pid'] <= 0:
