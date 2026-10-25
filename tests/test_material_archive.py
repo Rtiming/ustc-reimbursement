@@ -14,6 +14,22 @@ from material_archive import archive_core, windows_stable_copy
 
 
 class ArchiveAdapterTests(unittest.TestCase):
+    def test_real_intake_loads_adapter_module_and_reads_back_original(self):
+        from material_intake import execute
+        script = Path(__file__).resolve().parents[1] / 'tools/material_archive.py'
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            source = root / '合成原件.txt'
+            source.write_bytes(b'synthetic original')
+            result = execute({'schema': 'reimbursement.material-intake.v1', 'case_id': 'adapter_fixture',
+                              'sources': [{'id': 'fixture', 'path': str(source), 'group_strip_dirs': None}],
+                              'output_dir': str(root / 'output')},
+                             archive_helper={'path': str(script), 'sha256': hashlib.sha256(script.read_bytes()).hexdigest()})
+            self.assertTrue(result['ok'], result)
+            import json
+            receipt = json.loads((root / 'output/receipt.json').read_text(encoding='utf-8'))
+            self.assertEqual(Path(receipt['originals'][0]['snapshot']).read_bytes(), source.read_bytes())
+
     def test_cli_preserves_core_failure_exit_status(self):
         script = Path(__file__).resolve().parents[1] / 'tools/material_archive.py'
         with tempfile.TemporaryDirectory() as temp:

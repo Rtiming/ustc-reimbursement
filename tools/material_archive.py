@@ -47,5 +47,13 @@ def windows_stable_copy(source, target):
     return original_sha
 
 
+def archive(*args, **kwargs):
+    return archive_core().archive(*args, **kwargs)
+
+
+def verify_receipt(path):
+    return archive_core().verify_receipt(path)
+
+
 if __name__ == '__main__':
     raise SystemExit(archive_core().main())

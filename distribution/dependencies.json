@@ -2,7 +2,7 @@
   "schema": "ustc-distribution-dependencies-v1",
   "archive_helper": {
     "path": "tools/material_archive.py",
-    "sha256": "fabf5024156520ba81588f03a1b10cd9d708f39573a9abbcec7ed7351c758d49",
+    "sha256": "fa476a88bc2025b21081a54ad4acdadbb526b9e2aced636c7e26abe6259a781c",
     "source_owner": "project material archive adapter",
     "snapshot_date": "2026-10-25",
     "python_min": "3.11",
