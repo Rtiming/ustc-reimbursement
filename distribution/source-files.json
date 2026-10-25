@@ -118,6 +118,7 @@
     "tools/audit_materials.py",
     "tools/batch_delivery.py",
     "tools/batch_workflow.py",
+    "tools/bootstrap_boundary.ps1",
     "tools/bootstrap_boundary.sh",
     "tools/bootstrap_install.ps1",
     "tools/bootstrap_install.sh",

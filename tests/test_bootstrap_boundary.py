@@ -13,8 +13,10 @@ class BootstrapBoundaryTests(unittest.TestCase):
     def fixture(self, temp):
         root = Path(temp).resolve() / 'tool'
         (root / 'tools').mkdir(parents=True)
-        for name in ('bootstrap_install.sh', 'bootstrap_boundary.sh', 'bootstrap_install.ps1'):
+        for name in ('bootstrap_install.sh', 'bootstrap_boundary.sh', 'bootstrap_install.ps1', 'bootstrap_boundary.ps1'):
             shutil.copy2(ROOT / 'tools' / name, root / 'tools' / name)
+        (root / 'distribution').mkdir()
+        shutil.copy2(ROOT / 'distribution/bootstrap.tsv', root / 'distribution/bootstrap.tsv')
         return root
 
     @unittest.skipIf(os.name == 'nt', 'POSIX installer')
@@ -68,3 +70,57 @@ class BootstrapBoundaryTests(unittest.TestCase):
                 self.assertEqual(list(outside.iterdir()), [])
             finally:
                 link.rmdir()
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows pinned Python alias')
+    def test_windows_only_exact_pinned_alias_is_allowed(self):
+        import csv
+        with tempfile.TemporaryDirectory() as temp:
+            root = self.fixture(temp)
+            with (root / 'distribution/bootstrap.tsv').open() as stream:
+                row = next(x for x in csv.DictReader(stream, delimiter='\t') if x['platform'] == 'windows-x86_64')
+            version = row['python']
+            base = root / '.local/python'; base.mkdir(parents=True)
+            target = base / ('cpython-' + version + '-windows-x86_64-none'); target.mkdir()
+            alias = base / ('cpython-' + '.'.join(version.split('.')[:2]) + '-windows-x86_64-none')
+            outside = Path(temp).resolve() / 'outside'; outside.mkdir()
+            other = base / 'other'; other.mkdir()
+
+            def junction(link, dest):
+                made = subprocess.run(['cmd.exe', '/d', '/c', 'mklink', '/J', str(link), str(dest)], capture_output=True)
+                self.assertEqual(made.returncode, 0, made.stderr)
+
+            def check(allowed):
+                done = subprocess.run(['powershell.exe', '-NoProfile', '-File', str(root / 'tools/bootstrap_boundary.ps1'), '-ToolRoot', str(root)], capture_output=True, timeout=20)
+                if allowed:
+                    self.assertEqual(done.returncode, 0, done.stderr)
+                else:
+                    self.assertNotEqual(done.returncode, 0)
+                    self.assertIn(b'Runtime reparse point is not allowed', done.stderr)
+
+            for dest in (target, outside, other, base / 'missing'):
+                junction(alias, dest)
+                try:
+                    check(dest == target)
+                finally:
+                    alias.rmdir()
+            unexpected = base / 'unlisted-alias'
+            junction(unexpected, target)
+            try:
+                check(False)
+            finally:
+                unexpected.rmdir()
+            # A correctly named alias must not conceal a second link or a link below the target.
+            junction(alias, target)
+            target.rmdir()
+            junction(target, outside)
+            try:
+                check(False)
+            finally:
+                target.rmdir(); target.mkdir()
+            nested = target / 'nested'
+            junction(nested, outside)
+            try:
+                check(False)
+            finally:
+                nested.rmdir(); alias.rmdir()
+            self.assertEqual(list(outside.iterdir()), [])

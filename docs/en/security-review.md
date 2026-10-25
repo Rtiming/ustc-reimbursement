@@ -11,7 +11,7 @@ Scope/date: 2026-10-25, candidate 0.5 source, pinned dependencies, bootstrap sta
 | OpenTelemetry API 1.45.0 matched CVE-2026-114603 | Pin 1.45.1; default stdio does not expose an HTTP service, but the dependency is still patched |
 | Multiple Office/OFD XML readers; ASCII-only declaration checks could miss UTF-16 | Shared safe_xml/defusedxml boundary, entities/external access rejected, byte/depth/element limits, bounded ZIP reads |
 | A verified vendor source was reread by a loader that could accept neighboring pyc | Compile/execute the exact verified bytes; regression uses equal-size/timestamp alternative bytecode |
-| Bootstrap could follow runtime links before Python-stage validation | Check before download/write/--check execution; reject escaping links and Windows reparse points, retain normal internal Python links |
+| Bootstrap could follow runtime links before Python-stage validation | Check before download/write/--check execution; Windows permits only the frozen minor-version Python alias to its exact sibling full-version real directory; all other reparse points are rejected and aliases are not traversed |
 
 Previous fixes for authorization-revocation CAS, same-path bridge state protection and cross-user setup-task cleanup retain their regression tests. Candidate configuration and synthetic receipts never become live finance evidence.
 
