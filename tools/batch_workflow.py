@@ -103,7 +103,8 @@ def inspect_batch(service, scenario, batch_index, sequences=None, allow_incomple
     requested = None if sequences is None else set(sequences)
     if requested is not None and (not requested or any(type(x) is not int or x <= 0 for x in requested)):
         raise APIError('batch_sequences', '序号须为非空正整数列表')
-    current_profile = service.standards_read(str(service.root / '规范库'), scenario)
+    from workspace_config import standards_library
+    current_profile = service.standards_read(str(standards_library(service.root)), scenario)
     rows, seen, cases = [], set(), set()
     for row in index.get('documents', []):
         seq = row.get('index')

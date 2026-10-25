@@ -2,6 +2,7 @@
 import hashlib
 import json
 import math
+import re
 import os
 from pathlib import Path
 import sys
@@ -60,7 +61,7 @@ def status(*, state=None):
 RESCUE_OPERATIONS = frozenset({'ping', 'tab-close', 'reload', 'page-read'})
 
 
-def request(operation, arguments=None, *, timeout=20, state=None):
+def request(operation, arguments=None, *, timeout=20, state=None, request_id=None):
     if operation not in {'inventory', 'evaluate', 'validate-tab', 'create-page', 'tab-origin', 'smoke',
                          'ping', 'tab-close', 'reload', 'page-read','create-finance-window','wake-finance-tab','relocate-finance-tab','show-verification'}:
         raise ValueError('未支持的Windows财务桥操作')
@@ -70,17 +71,29 @@ def request(operation, arguments=None, *, timeout=20, state=None):
     current = status() if state is None else status(state=directory)
     if not current['ready']:
         raise BridgeUnavailable('Windows财务扩展未连接；先安装/启用本项目扩展，工具不会启动浏览器或切换前台')
-    if current.get('active_request_id') and operation not in RESCUE_OPERATIONS:
+    if request_id is not None and (not isinstance(request_id, str) or not re.fullmatch(r'[a-f0-9]{32}', request_id)):
+        raise ValueError('原生请求ID须为32位小写十六进制')
+    request_id = request_id or uuid.uuid4().hex
+    request_path = directory / 'requests' / (request_id + '.json')
+    existing = request_path.exists()
+    if current.get('active_request_id') and operation not in RESCUE_OPERATIONS and not existing:
         raise BridgeUnavailable('Windows财务桥仍在等待原请求；不排队重放：' + str(current['active_request_id']))
     if current.get('synthetic_profile') and operation not in {'inventory', 'smoke'}:
         raise BridgeUnavailable('合成测试profile不接受真实财务动作；使用本机本人已登录的浏览器')
-    request_id = uuid.uuid4().hex
     packet = {'schema': 'ustc-native-edge-v1', 'id': request_id, 'epoch': current['epoch'],
               'operation': operation, 'arguments': arguments or {}, 'created_at': time.time(),
               'expires_at': time.time() + timeout}
     if len(json.dumps(packet, ensure_ascii=False).encode('utf-8')) > MAX_REQUEST:
         raise ValueError('单次浏览器脚本超过Native Messaging预算；未派发，不截断执行')
-    atomic_private(directory / 'requests' / (request_id + '.json'), packet, exclusive=True)
+    if existing:
+        if not is_private_path(request_path):
+            raise BridgeUnavailable('原生请求权限改变；保留原任务')
+        original = json.loads(request_path.read_text(encoding='utf-8'))
+        if any(original.get(k) != packet[k] for k in ('schema', 'id', 'epoch', 'operation', 'arguments')):
+            raise BridgeUnavailable('原请求身份、连接或参数不同；不重新派发')
+        # 只轮询原响应；不改原截止时间、不覆盖原意图，不再排入第二份请求。
+    else:
+        atomic_private(request_path, packet, exclusive=True)
     deadline = time.monotonic() + timeout
     output = directory / 'responses' / (request_id + '.json')
     while time.monotonic() < deadline:
@@ -88,6 +101,11 @@ def request(operation, arguments=None, *, timeout=20, state=None):
             if not is_private_path(output):
                 raise BridgeUnavailable('Windows财务桥响应权限不符；保留原请求')
             reply = json.loads(output.read_text(encoding='utf-8'))
+            late = output.with_name(output.stem + '.late.json')
+            if reply.get('error_code') == 'request_stalled' and late.exists():
+                if not is_private_path(late):
+                    raise BridgeUnavailable('原生迟到回执权限不符')
+                reply = json.loads(late.read_text(encoding='utf-8'))
             if reply.get('id') != request_id or reply.get('epoch') != current['epoch']:
                 raise BridgeUnavailable('Windows财务桥响应身份不一致；保留原请求')
             if reply.get('ok') is not True:
@@ -99,22 +117,16 @@ def request(operation, arguments=None, *, timeout=20, state=None):
 
 
 def inventory():
-    value = request('inventory')
-    # 扩展只核对浏览器窗口焦点；系统前台身份来自Windows，只读而不激活任何应用。
-    import ctypes
-    from ctypes import wintypes as wt
-    user = ctypes.WinDLL('user32', use_last_error=True)
-    user.GetForegroundWindow.restype = wt.HWND
-    user.GetWindowThreadProcessId.argtypes = [wt.HWND, ctypes.POINTER(wt.DWORD)]
-    hwnd, pid = user.GetForegroundWindow(), wt.DWORD()
-    if not hwnd or not user.GetWindowThreadProcessId(hwnd, ctypes.byref(pid)):
-        raise BridgeUnavailable('Windows前台身份不可核对；未执行页面操作')
-    value.update(frontmost_bundle_id='windows-hwnd-' + str(hwnd), frontmost_process_id=pid.value,
-                 observed_at_utc=time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()))
-    return value
+    # SSH/AI客户端可能处于Session 0；桌面身份只能由浏览器原生主机观察。
+    from native_finance_bridge import inventory as native_inventory
+    return native_inventory()
 
 
 def evaluate(source, tab_id=None, *, timeout=20, access=False):
+    if os.environ.get('REIMBURSEMENT_EDGE_TAB_NAMESPACE'):
+        from native_finance_bridge import evaluate as native_evaluate
+        from finance_backend import native_target
+        return native_evaluate(source, tab_id, timeout=timeout, access=access, **native_target())
     if tab_id is not None and (not isinstance(tab_id, (str, int)) or not str(tab_id).isdigit()):
         raise ValueError('须明确合法数字标签ID')
     result = request('evaluate', {'tab_id': str(tab_id) if tab_id is not None else None,
@@ -132,4 +144,8 @@ def list_tabs(*, access=False):
 def validate_tab(tab_id, foreground=False):
     if foreground:
         raise BridgeUnavailable('既有标签常规校验不切前台；开页和PDF导出须走各自明确授权的开关')
+    if os.environ.get('REIMBURSEMENT_EDGE_TAB_NAMESPACE'):
+        from native_finance_bridge import validate_tab as native_validate
+        from finance_backend import native_target
+        return native_validate(tab_id, **native_target())
     return request('validate-tab', {'tab_id': str(tab_id)})

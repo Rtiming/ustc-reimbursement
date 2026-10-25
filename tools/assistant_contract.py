@@ -47,6 +47,7 @@ DOCS = {
     'export': 'docs/财务PDF导出.md',
     'windows': 'docs/Windows静默财务桥.md',
     'ocr': 'docs/OCR统一流程.md',
+    'batch-workflow': 'docs/整批流程与登记.md',
 }
 JSON_METHODS = frozenset(
     {
@@ -72,6 +73,9 @@ JSON_METHODS = frozenset(
         'enqueue',
         'result',
         'capabilities',
+        'bridge',
+        'register_workflow',
+        'workflow',
         'standards_init',
         'standards_add_profile',
         'standards_read',

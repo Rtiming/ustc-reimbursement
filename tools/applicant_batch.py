@@ -32,7 +32,10 @@ def check_case_binding(service, row):
 
 
 def validate_manifest(service, manifest, userid, execute=False):
-    value = read_json(manifest)
+    return validate_manifest_value(service, read_json(manifest), userid, execute)
+
+
+def validate_manifest_value(service, value, userid, execute=False):
     if (
         value.get('schema') != 'ustc-applicant-batch-v1'
         or value.get('expected_userid') != userid
@@ -442,7 +445,7 @@ def run_applicant_batch(service, session, manifest, *, execute=False, progress=N
                     + ' --phase approve --execute',
                 )
                 if value.get('show_verification_interface') is True:
-                    from mac_edge_bridge import show_verification, status
+                    from native_finance_bridge import show_verification, status
 
                     session.recover_frozen()
                     row['verification_interface'] = show_verification(

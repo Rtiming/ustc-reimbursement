@@ -196,7 +196,7 @@ $b.Save($path,[System.Drawing.Imaging.ImageFormat]::Png);$b.Dispose()
     return powershell(source)
 
 
-def load_extension():
+def load_extension(force_load=False):
     record, window = manager()
     source = r'''$ErrorActionPreference='Stop'
 [Console]::OutputEncoding=New-Object System.Text.UTF8Encoding($false)
@@ -215,11 +215,11 @@ if($loads.Count -eq 0) {
  Start-Sleep -Milliseconds 300
 }
 $matches=@(Elements | Where-Object {$_.Current.Name.Contains('EXTENSION_ID')})
-if($matches.Count -gt 0) { @{already_installed=$true;developer_mode_changed=$developerChanged}|ConvertTo-Json -Compress; exit }
+if($matches.Count -gt 0 -and -not FORCE_LOAD) { @{already_installed=$true;developer_mode_changed=$developerChanged}|ConvertTo-Json -Compress; exit }
 $loads=@(Elements | Where-Object {$_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and $_.Current.Name -in @('加载解压缩的扩展','加载解压缩','Load unpacked')})
 if($loads.Count -ne 1 -or -not $loads[0].Current.IsEnabled) {throw 'Load unpacked unavailable; browser restrictions were not bypassed'}
 $loads[0].GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-@{already_installed=$false;developer_mode_changed=$developerChanged;folder_dialog_requested=$true}|ConvertTo-Json -Compress'''.replace('HANDLE', str(window['handle'])).replace('EXTENSION_ID', extension_id())
+@{already_installed=$false;developer_mode_changed=$developerChanged;folder_dialog_requested=$true}|ConvertTo-Json -Compress'''.replace('HANDLE', str(window['handle'])).replace('EXTENSION_ID', extension_id()).replace('FORCE_LOAD', '$true' if force_load else '$false')
     result = powershell(source)
     record['events'].append(result)
     record['phase']='extension_already_installed' if result.get('already_installed') else 'folder_dialog_requested'
@@ -471,14 +471,14 @@ def close_installation_windows():
     return record
 
 
-def install():
+def install(expected_registration_sha256=None):
     current=capabilities()
     if current['bridge_connected']:
         return {'ok':True,'already_connected':True,'ui_used':False,'capabilities':current}
-    install_host()
+    registered = install_host(expected_registration_sha256)
     prepare_manager()
     try:
-        observation=load_extension()
+        observation=load_extension(force_load=registered.get('registration_migrated', False))
         if observation.get('already_installed'):
             reload_installed()
         else:

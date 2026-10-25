@@ -105,6 +105,24 @@ def write_frame(stream, value):
     stream.flush()
 
 
+def desktop_observation():
+    """原生主机与Edge同处交互会话；不从SSH客户端的Session 0猜测桌面。"""
+    result = {'foreground_identity_observed': False, 'foreground_state': 'unknown',
+              'frontmost_bundle_id': None, 'frontmost_process_id': None}
+    if os.name != 'nt':
+        return result
+    import ctypes
+    from ctypes import wintypes as wt
+    user = ctypes.WinDLL('user32', use_last_error=True)
+    user.GetForegroundWindow.restype = wt.HWND
+    user.GetWindowThreadProcessId.argtypes = [wt.HWND, ctypes.POINTER(wt.DWORD)]
+    hwnd, pid = user.GetForegroundWindow(), wt.DWORD()
+    if hwnd and user.GetWindowThreadProcessId(hwnd, ctypes.byref(pid)):
+        result.update(foreground_identity_observed=True, foreground_state='observed',
+                      frontmost_bundle_id='windows-hwnd-' + str(hwnd), frontmost_process_id=pid.value)
+    return result
+
+
 def serve(input_stream, output_stream):
     from edge_runtime import file_lock
     STATE.mkdir(parents=True, exist_ok=True)
@@ -208,6 +226,8 @@ def serve(input_stream, output_stream):
                             atomic_private(STATE/'auth-intents'/(active['id']+'.json'),auth_record)
                         else:
                             reply = {**item, 'epoch': epoch, 'received_at': time.time()}
+                            if active.get('operation') == 'inventory' and isinstance(reply.get('result'), dict):
+                                reply['result'] = {**reply['result'], **desktop_observation()}
                         response_id = active['id']
                         auth_answer=active.get('answer')
                         active = None

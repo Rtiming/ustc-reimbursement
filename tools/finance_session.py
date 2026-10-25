@@ -110,6 +110,15 @@ def check_page(case_id, tab_id, expected_userid, output):
     return record
 
 
+def foreground_comparison(before, after):
+    """两个未知桌面不能相等为“保持前台”；SSH/锁屏不可观察时保留None。"""
+    for item in (before, after):
+        if (item.get('foreground_identity_observed') is False or not item.get('frontmost_bundle_id')
+                or type(item.get('frontmost_process_id')) is not int or item['frontmost_process_id'] <= 0):
+            return None
+    return (before['frontmost_bundle_id'], before['frontmost_process_id']) == (after['frontmost_bundle_id'], after['frontmost_process_id'])
+
+
 @contextmanager
 def quiet_tab_context(tab_id, output, access_pages=False):
     """后台应用内临时保持财务标签；前台使用中的标签不动，不激活应用。"""
@@ -142,7 +151,7 @@ def quiet_tab_context(tab_id, output, access_pages=False):
             yield
         finally:
             after = native_inventory()
-            record.update(after=after, frontmost_preserved=(before['frontmost_bundle_id'], before['frontmost_process_id']) == (after['frontmost_bundle_id'], after['frontmost_process_id']),
+            record.update(after=after, frontmost_preserved=foreground_comparison(before, after),
                           old_active_tabs_preserved=before['windows'] == after['windows'])
             write(output, record)
         return

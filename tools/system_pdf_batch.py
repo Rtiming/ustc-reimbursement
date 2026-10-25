@@ -39,9 +39,9 @@ def validate_entries(service, manifest, userid):
         if (
             plan.get('view_kind') != 'details'
             or plan.get('delivery_mode') != 'rename_only'
-            or plan.get('filename_separator') != ' '
+            or plan.get('filename_separator') not in (' ', '_')
         ):
-            raise APIError('system_pdf_mode', '本流水线按查看明细原文件、空格命名、仅归档执行')
+            raise APIError('system_pdf_mode', '明细原文件只归档；命名分隔须明确为空格或下划线')
         output = Path(row['export_root']).resolve()
         if not any(output.is_relative_to(root) for root in service.material_roots):
             raise APIError('system_pdf_root', '导出路径超出授权材料根')
