@@ -115,7 +115,7 @@ def checks(root, config, folder, *, ocr_smoke=False):
             output = folder / 'smoke.json'
             command = [
                 str(python),
-                '-I',
+                '-X', 'utf8', '-I',
                 str(root / 'tools/distribution_smoke.py'),
                 '--mcp',
                 '--materials',
@@ -228,7 +228,7 @@ def run(
                 environment = private_environment(root)
                 command = [
                     sys.executable,
-                    '-I',
+                    '-X', 'utf8', '-I',
                     str(root / 'assistant.py'),
                     'setup',
                     '--with-materials',

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 from pathlib import Path
 import shutil
 import subprocess
@@ -31,7 +32,7 @@ def main():
                if os.name == 'nt' else ['sh', str(package / 'install.sh')])
     steps = []
     result = {'ok': False, 'steps': steps, 'browser_actions_executed': False,
-              'archive_sha256': receipt['archive_sha256']}
+              'archive_sha256': receipt['archive_sha256'], 'platform': platform.system(), 'machine': platform.machine()}
     try:
         commands = [
             ('install-ocr', install + ['--with-ocr']),
@@ -52,6 +53,8 @@ def main():
     finally:
         for path in (package / '.local/self-checks').glob('*/result.json'):
             shutil.copy2(path, reports / ('self-check-' + path.parent.name + '.json'))
+        for path in (package / '.local/self-checks').glob('*/smoke.log'):
+            shutil.copy2(path, reports / ('smoke-' + path.parent.name + '.log'))
         for path in (package / '.local/self-checks').glob('*/install.log'):
             shutil.copy2(path, reports / ('dependencies-' + path.parent.name + '.log'))
         (reports / 'result.json').write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')

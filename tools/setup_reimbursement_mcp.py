@@ -35,7 +35,7 @@ def installed_versions(python, names, env=None):
         'print(json.dumps(out))'
     )
     probe = subprocess.run(
-        [str(python), '-I', '-c', code, json.dumps(list(names))],
+        [str(python), '-X', 'utf8', '-I', '-c', code, json.dumps(list(names))],
         capture_output=True,
         text=True,
         timeout=20,
@@ -54,7 +54,7 @@ def material_versions(python):
     probe = subprocess.run(
         [
             str(python),
-            '-I',
+            '-X', 'utf8', '-I',
             '-c',
             'import json,pymupdf,PIL; from importlib.metadata import version; print(json.dumps({n:version(n) for n in ["PyMuPDF","Pillow"]}))',
         ],
@@ -215,7 +215,7 @@ def setup(check_only=False, with_materials=False, material_roots=None, with_ocr=
         probe = subprocess.run(
             [
                 str(python),
-                '-I',
+                '-X', 'utf8', '-I',
                 '-c',
                 'from importlib.metadata import version; from mcp.server import MCPServer; print(version("mcp"))',
             ],

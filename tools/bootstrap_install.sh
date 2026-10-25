@@ -8,7 +8,7 @@ if [ "${1:-}" = "--check" ]; then
         printf '%s\n' '尚未安装；先运行 sh install.sh。自检不会联网安装。' >&2
         exit 2
     fi
-    exec .local/mcp-venv/bin/python -I tools/portable_install.py "$@"
+    exec .local/mcp-venv/bin/python -X utf8 -I tools/portable_install.py "$@"
 fi
 case "$(uname -s)-$(uname -m)" in
     Darwin-arm64) REIMBURSE_INSTALL_PLATFORM=darwin-arm64 ;;
@@ -55,4 +55,4 @@ unset PYTHONPATH PYTHONHOME VIRTUAL_ENV UV_CONFIG_FILE UV_PYTHON
 reimburse_uv python install "$REIMBURSE_PYTHON_VERSION" --no-bin --no-registry --no-config
 REIMBURSE_MANAGED_PYTHON=$(reimburse_uv python find "$REIMBURSE_PYTHON_VERSION" --managed-python --no-project --no-config)
 case "$REIMBURSE_MANAGED_PYTHON" in "$REIMBURSE_INSTALL_ROOT"/.local/python/*) ;; *) printf '%s\n' '运行时不属于本工具目录，已停止。' >&2; exit 2 ;; esac
-exec "$REIMBURSE_MANAGED_PYTHON" -I tools/portable_install.py "$@"
+exec "$REIMBURSE_MANAGED_PYTHON" -X utf8 -I tools/portable_install.py "$@"

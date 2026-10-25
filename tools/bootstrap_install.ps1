@@ -12,7 +12,7 @@ Set-Location -LiteralPath $toolRoot
 if ($args.Count -gt 0 -and $args[0] -eq '--check') {
     $python = Join-Path $toolRoot '.local\mcp-venv\Scripts\python.exe'
     if (-not (Test-Path -LiteralPath $python)) { throw '尚未安装；先运行install.cmd。自检不会联网安装。' }
-    & $python -I (Join-Path $toolRoot 'tools\portable_install.py') @args
+    & $python -X utf8 -I (Join-Path $toolRoot 'tools\portable_install.py') @args
     exit $LASTEXITCODE
 }
 $cpu = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
@@ -47,5 +47,5 @@ $uv = Join-Path $bootstrap 'uv.exe'
 if ($LASTEXITCODE -ne 0) { throw '独立Python安装失败；保留下载与日志，修复网络后重试' }
 $python = (& $uv python find $row.python --managed-python --no-project --no-config | Select-Object -Last 1).Trim()
 if ($LASTEXITCODE -ne 0 -or -not $python.StartsWith($env:UV_PYTHON_INSTALL_DIR, [StringComparison]::OrdinalIgnoreCase)) { throw '运行时不属于当前工具目录' }
-& $python -I (Join-Path $toolRoot 'tools\portable_install.py') @args
+& $python -X utf8 -I (Join-Path $toolRoot 'tools\portable_install.py') @args
 exit $LASTEXITCODE
