@@ -179,6 +179,7 @@ def build(output_dir, *, execute=False, root=ROOT):
     with zipfile.ZipFile(archive, 'x', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as output:
         for name, raw in sorted(members.items()):
             info = zipfile.ZipInfo('ustc-reimbursement/' + name, date_time=(2026, 10, 24, 0, 0, 0))
+            info.create_system = 3  # 固定ZIP属性来源，避免同一源码随构建系统改变字节。
             info.compress_type = zipfile.ZIP_DEFLATED
             mode = 0o100755 if Path(name).suffix in {'.sh', '.command'} else 0o100644
             info.external_attr = mode << 16

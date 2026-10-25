@@ -114,6 +114,9 @@ class DistributionTests(unittest.TestCase):
             a = build(root / 'first', execute=True)
             b = build(root / 'second', execute=True)
             self.assertEqual(a['archive_sha256'], b['archive_sha256'])
+            with patch('zipfile.sys.platform', 'win32'):
+                other_os = build(root / 'windows-metadata', execute=True)
+            self.assertEqual(a['archive_sha256'], other_os['archive_sha256'])
             with zipfile.ZipFile(a['archive']) as archive:
                 manifest = json.loads(archive.read('ustc-reimbursement/MANIFEST.json'))
                 self.assertEqual(len(manifest['files']), preview['file_count'])

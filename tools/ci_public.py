@@ -28,7 +28,7 @@ def main():
     package = extracted / 'ustc-reimbursement'
     env = {**os.environ, 'PYTHONUTF8': '1', 'PYTHONIOENCODING': 'utf-8'}
     python = package / '.local/mcp-venv' / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
-    install = (['powershell.exe', '-NoProfile', '-File', str(package / 'tools/bootstrap_install.ps1')]
+    install = (['cmd.exe', '/d', '/c', 'install.cmd']
                if os.name == 'nt' else ['sh', str(package / 'install.sh')])
     steps = []
     result = {'ok': False, 'steps': steps, 'browser_actions_executed': False,
