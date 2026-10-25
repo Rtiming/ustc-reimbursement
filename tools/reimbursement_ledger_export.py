@@ -5,7 +5,7 @@ import json
 import re
 import zipfile
 from pathlib import Path
-from xml.etree import ElementTree as ET
+import safe_xml as ET
 
 
 def display_text(value):
@@ -25,11 +25,11 @@ def validate_saved_cells(path, data, formulas):
             index = index // 26 - 1
         return value
     with zipfile.ZipFile(path) as z:
-        strings = [''.join(t.itertext()) for t in ET.fromstring(z.read('xl/sharedStrings.xml')).findall('m:si', ns)] if 'xl/sharedStrings.xml' in z.namelist() else []
-        names = [s.attrib['name'] for s in ET.fromstring(z.read('xl/workbook.xml')).findall('m:sheets/m:sheet', ns)]
+        strings = [''.join(t.itertext()) for t in ET.from_zip(z, 'xl/sharedStrings.xml').findall('m:si', ns)] if 'xl/sharedStrings.xml' in z.namelist() else []
+        names = [s.attrib['name'] for s in ET.from_zip(z, 'xl/workbook.xml').findall('m:sheets/m:sheet', ns)]
         if names != [t['name'] for t in data['tables']]: errors.append('sheet_names_or_order')
         for i, table in enumerate(data['tables'], 1):
-            root = ET.fromstring(z.read(f'xl/worksheets/sheet{i}.xml'))
+            root = ET.from_zip(z, f'xl/worksheets/sheet{i}.xml')
             cells = {c.attrib['r']: c for c in root.findall('.//m:sheetData/m:row/m:c', ns)}
             pane = root.find('m:sheetViews/m:sheetView/m:pane', ns)
             if pane is None or pane.get('ySplit') != '5': errors.append(f'{table["name"]}: frozen_header')
@@ -181,7 +181,7 @@ def export_workbook(workbook_data_path, output_dir):
     with zipfile.ZipFile(targets[0]) as archive:
         for member in archive.namelist():
             if re.fullmatch(r'xl/worksheets/sheet\d+\.xml',member):
-                root=ET.fromstring(archive.read(member))
+                root=ET.from_zip(archive, member)
                 for c in root.findall('.//m:c',ns):
                     if c.get('t')=='e':errors.append({'sheet':member,'cell':c.get('r'),'error':c.findtext('m:v',namespaces=ns)})
                     if c.find('m:f',ns) is not None:

@@ -923,7 +923,7 @@
     },
     {
       "name": "reimbursement_guide",
-      "description": "按需取得完整输入示例及操作说明：intake收件归档、planning规范维护与批次规划、export原生PDF、windows静默桥；quickstart总入口，standards规范体系，workflow财务顺序，materials材料要求。",
+      "description": "Read task guidance in Chinese or English / 按需读取中英文说明。language只影响文档，不改变权限、案件和请求。参数正本仍为tool_catalog。",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -945,9 +945,20 @@
               "export",
               "windows",
               "ocr",
-              "batch-workflow"
+              "batch-workflow",
+              "configuration",
+              "security"
             ],
             "title": "Topic",
+            "type": "string"
+          },
+          "language": {
+            "default": "zh",
+            "enum": [
+              "zh",
+              "en"
+            ],
+            "title": "Language",
             "type": "string"
           }
         },

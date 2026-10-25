@@ -1,5 +1,7 @@
 # 参与开发
 
+[中文](CONTRIBUTING.md) | [English](CONTRIBUTING.en.md)
+
 公开协作、Issue、Pull Request与版本发布均在[本仓库](https://github.com/Rtiming/ustc-reimbursement)。只提交通用实现、空白模板和合成测试；真实案件、规则来源中的个人信息、浏览器现场、账号配置与日志不进入Git。
 
 ## 本地流程
@@ -7,6 +9,7 @@
 安装方式见[部署指南](docs/部署指南.md)。安装后，使用`.local/mcp-venv/bin/python`，Windows改为`.local/mcp-venv/Scripts/python.exe`：
 
 ```sh
+.local/mcp-venv/bin/python tools/check_public_docs.py
 .local/mcp-venv/bin/python -m unittest discover -s tests -p 'test_*.py'
 .local/mcp-venv/bin/python tools/distribution_smoke.py --mcp --materials --output .local/dev-smoke.json
 ```
@@ -28,6 +31,8 @@ OCR修改需要显式安装`--with-ocr`，再给演练加`--ocr`。所有测试�
 ```
 
 这个命令只同步声明的公共别名，不修改用户资料。`MANIFEST.json`属于发行包，不提交到源码分支；Git检出自检和发行包SHA自检分别留证。
+
+中英文topic映射在assistant_contract中维护，参数与权限只有一个正本；翻译不能改默认值或适用范围。材料XML统一使用safe_xml，不再各自配置解析器。
 
 提交前检查`git diff`与暂存文件，逐项暂存，不添加cases、materials、.local、规范库或凭据。使用合成例子复现问题。PR说明具体触发、改后行为、运行的验证和未验收平台；对未知财务写结果不增加自动重试。
 

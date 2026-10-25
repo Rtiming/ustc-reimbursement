@@ -1,5 +1,7 @@
 # 报销工具代理入口
 
+[中文](AGENTS.md) | [English](AGENTS.en.md)。英文说明用`guide(topic="quickstart", language="en")`；语言只影响文档，不改变权限、规则、请求或财务参数。
+
 1. 先读`docs/用户指南.md`及当前用户指定案件的README。未安装先运行根目录install.sh/install.cmd；已安装用--check自检。资料根和当前专项从本机`.local/installation.json`读取，不猜作者路径。不要读取或借用其他案件的身份、金额、经费和授权。
 2. 用`capabilities(intent)`选任务组，按`next_action`和`needed_inputs`继续。MCP方法加`reimbursement_`前缀；JSON方法不加前缀。准确参数从MCP schema或`mcp/tool_catalog.json`读取。
 3. 首次使用`standards_init`预览并创建新私人规范库；已有库追加专项用standards_add_profile预览，再携原registry SHA保存。`student_activity/research_purchase/travel`是材料场景，`profile_id`是用户的组织/项目专项。`extends`只组合显式登记规则；有冲突先保留来源，不按层级猜覆盖。

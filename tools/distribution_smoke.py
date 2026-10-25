@@ -106,6 +106,8 @@ async def check_mcp(root, material, workspace):
         assert empty['cases'] == []
         guide = await invoke('reimbursement_guide', {'topic': 'quickstart'})
         assert 'prepare_batch_file' in guide['text']
+        english = await invoke('reimbursement_guide', {'topic': 'configuration', 'language': 'en'})
+        assert english['language'] == 'en' and english['text'].startswith('# Configuration')
         preview = await invoke(
             'reimbursement_standards_init',
             {

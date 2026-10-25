@@ -1,0 +1,6 @@
+{
+  "method": "capabilities",
+  "params": {
+    "intent": "materials"
+  }
+}

@@ -7,7 +7,7 @@ import subprocess
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
-from xml.etree import ElementTree as ET
+import safe_xml as ET
 
 
 def compact(value):
@@ -15,7 +15,8 @@ def compact(value):
 
 
 def parse_bbox(xml, text):
-    root = ET.fromstring(xml)
+    # Poppler生成的XHTML可能含DOCTYPE；实体与外部资源仍一律拒绝。
+    root = ET.fromstring(xml, allow_dtd=True)
     ns = {'h': 'http://www.w3.org/1999/xhtml'}
     date_range = re.search(r'(?:行程起止日期|行程时间)\s*[:：]\s*(\d{4})-\d{2}-\d{2}.*?(?:至|~)', text)
     year = date_range.group(1) if date_range else None

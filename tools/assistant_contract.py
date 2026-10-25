@@ -48,6 +48,18 @@ DOCS = {
     'windows': 'docs/Windows静默财务桥.md',
     'ocr': 'docs/OCR统一流程.md',
     'batch-workflow': 'docs/整批流程与登记.md',
+    'configuration': 'docs/配置说明.md',
+    'security': 'SECURITY.md',
+}
+GUIDE_LANGUAGES = ('zh', 'en')
+DOCS_EN = {
+    'quickstart': 'docs/en/user-guide.md', 'start': 'docs/en/user-guide.md',
+    'workflow': 'docs/en/batch-workflow.md', 'batch-workflow': 'docs/en/batch-workflow.md',
+    'fields': 'docs/en/interfaces.md', 'devices': 'docs/en/deployment.md',
+    'configuration': 'docs/en/configuration.md', 'security': 'SECURITY.en.md',
+    'standards': 'docs/en/rules-and-planning.md', 'planning': 'docs/en/rules-and-planning.md',
+    **{topic: 'docs/en/materials-and-ocr.md' for topic in ('materials', 'printing', 'activity', 'ledger', 'intake', 'ocr')},
+    'export': 'docs/en/batch-workflow.md', 'windows': 'docs/en/batch-workflow.md',
 }
 JSON_METHODS = frozenset(
     {

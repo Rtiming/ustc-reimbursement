@@ -59,6 +59,33 @@ class WorkspaceConfigTests(unittest.TestCase):
         self.assertIn('-I', run.call_args.args[0])
         self.assertEqual(runtime_python(self.root).parent.parent, self.root / '.local/mcp-venv')
 
+    def test_all_locked_material_dependencies_are_probed(self):
+        from setup_reimbursement_mcp import material_versions, locked_packages
+
+        expected = locked_packages(Path(__file__).resolve().parents[1] / 'requirements-materials.lock.txt')
+        self.assertIn('defusedxml', expected)
+        self.assertEqual(material_versions(Path(sys.executable), expected), expected)
+        self.assertEqual(material_versions(Path(sys.executable), [*expected, 'missing-synthetic-package']), {})
+
+    def test_every_client_fragment_detects_drift_and_preserves_unicode_paths(self):
+        import tomllib
+        from setup_reimbursement_mcp import client_configuration, client_configuration_matches
+
+        python = self.root / '工具 with spaces/python'
+        args = ['服务.py', '--material-root', str(self.root / '资料 with spaces')]
+        expected = client_configuration(python, args, self.root)
+        for name, text in expected.items():
+            (self.root / name).write_text(text, encoding='utf-8')
+        self.assertEqual(tomllib.loads(expected['codex.toml'])['mcp_servers']['ustc_reimbursement'],
+                         json.loads(expected['mcp.json'])['mcpServers']['ustc_reimbursement'])
+        self.assertTrue(client_configuration_matches(self.root, expected))
+        for name, text in expected.items():
+            (self.root / name).write_text(text.replace('服务.py', 'other.py'), encoding='utf-8')
+            self.assertFalse(client_configuration_matches(self.root, expected), name)
+            (self.root / name).write_text(text, encoding='utf-8')
+        (self.root / 'dsh.patch.yml').unlink()
+        self.assertFalse(client_configuration_matches(self.root, expected))
+
 
 if __name__ == '__main__':
     unittest.main()

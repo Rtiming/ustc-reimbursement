@@ -1,0 +1,72 @@
+# Deployment
+
+[中文](../部署指南.md) | [English](deployment.md)
+
+Use a release attachment for routine installation and a Git checkout for development. This is a local CLI and stdio MCP service: no public HTTP endpoint, Docker, or maintainer account is required.
+
+| Platform | Bootstrap targets | System prerequisites |
+| --- | --- | --- |
+| macOS | arm64, x86_64 | sh, curl, unzip, shasum |
+| Windows | x64, ARM64 | Windows PowerShell, .NET ZIP/cryptography support, permitted script execution |
+| Linux | x86_64, aarch64 | sh, curl, unzip, awk, SHA256 utility; glibc distribution |
+
+A bootstrap target is not proof that every architecture has been tested. See [validation](validation.md). Windows ARM64, macOS Intel, Linux ARM64, and Alpine/musl are not covered by the candidate's current CI matrix. Package wheel availability can further restrict optional OCR.
+
+On a minimal Debian/Ubuntu system, ask its administrator to provide `curl`, `unzip`, `ca-certificates`, and, for OpenCV/OCR, `libgl1` and the distribution's glib runtime package (`libglib2.0-0` or its `t64` replacement). The installer does not bypass operating-system policy.
+
+## Fresh installation
+
+1. Download the attached installation ZIP and `SHA256SUMS`. Use `shasum -a 256`, `sha256sum`, or PowerShell `Get-FileHash -Algorithm SHA256` to compare the download.
+2. Extract to a writable, persistent directory. Quote paths containing spaces; Unicode paths are covered by the isolated CI workflow.
+3. Run `sh install.sh` on macOS/Linux or `install.cmd` on Windows. PowerShell requires `./install.cmd`.
+4. Read the returned `ok` and report path. `.local/self-check-current.json` points to JSON and HTML reports.
+5. Configure your own data directory, profile, rules, and AI client. Browser setup is a separate step.
+
+```sh
+sh install.sh --data-dir "/absolute/path/materials" --profile-id project_alpha --title "Project Alpha" --mode student_activity
+```
+
+```powershell
+./install.cmd --data-dir "D:/Reimbursement/materials" --profile-id project_alpha --title "Project Alpha" --mode student_activity
+```
+
+The launcher verifies uv 0.13.5 and obtains pinned Python 3.12.15, then installs locked packages under `.local/`. It does not change global Python, PATH, Python registry entries, or global AI configuration. Access to PyPI distribution hosts and the managed Python download host is required initially. Do not disable TLS or checksum verification to work around network failures.
+
+User pip/uv/Python configuration is isolated. Organization-specific mirrors and custom certificates are not automatically imported; configure and validate such deployments explicitly. The project does not copy another person's environment or secrets.
+
+## Optional OCR and offline checks
+
+`sh install.sh --with-ocr` (Windows: `install.cmd --with-ocr`) explicitly downloads CPU dependencies/models and tests a synthetic image. Default installation does not download models or upload documents.
+
+`sh install.sh --check` (Windows: `install.cmd --check`) checks an existing installation without installing dependencies or changing policies. It exercises CLI, stdio MCP, and synthetic intake. Optional-provider absence is separate from required checks. Failure logs are in the same report directory; retry normal installation only after resolving the cause, preserving existing user data.
+
+## Git checkout
+
+```sh
+git clone https://github.com/Rtiming/ustc-reimbursement.git
+cd ustc-reimbursement
+sh install.sh
+```
+
+Use `install.cmd` for the last command on Windows. A checkout is verified as `current_git_checkout`; a release archive is checked against its frozen manifest as `release_manifest`. A GitHub source ZIP without `.git` and without the release manifest is neither route: use the installation attachment or build a package yourself.
+
+## Upgrade and remove
+
+Finish or resolve existing work first. Install an upgrade into a new directory and preserve the old version and receipts. Reuse an explicitly authorized data directory; move case registrations and completed records only through their documented case handoff. Do not copy a venv, browser database, or the entire `.local` tree. An unknown finance write must be resolved in its original task before starting replacement work.
+
+Regenerate AI configuration on the receiver. A bridge migration must pass its own preview, owner, lock, and pending-request checks. Do not hand-edit registry keys to force it. Before deleting an installation, retain originals, policies, cases, and receipts and remove any native-host registration through the corresponding controlled maintenance route.
+
+## Troubleshooting
+
+| Symptom | Action |
+| --- | --- |
+| Missing system utility | Install the prerequisite; do not skip checksums |
+| PowerShell execution blocked | Follow organization policy; the launcher does not change ExecutionPolicy |
+| Download/TLS failure | Check network, clock, and certificates; preserve logs |
+| Missing libGL/glib | Install the Linux system libraries used by OpenCV |
+| Manifest mismatch | Restore the verified release; make code edits in a checkout |
+| Generated entry differs from source | Follow CONTRIBUTING to synchronize declared aliases |
+| Rules/provider missing | Configure it; absence is not a successful business check |
+| Bridge unavailable | Follow the [batch guide](batch-workflow.md); installation success does not prove login |
+
+The deployment pattern follows [uv's managed-Python guidance](https://docs.astral.sh/uv/guides/install-python/). Containerized or network-hosted finance automation is not a qualified deployment mode for this project.

@@ -87,6 +87,8 @@ def checks(root, config, folder, *, ocr_smoke=False):
         return {'ok': True, 'version': source['version'], 'verification_mode': source['verification_mode']}
 
     check('源码与发行文件完整性', source_integrity)
+    from check_public_docs import check as check_docs
+    check('中英文文档与配置示例', lambda: check_docs(root))
     ready = check(
         '本机运行时与代理配置',
         lambda: setup(

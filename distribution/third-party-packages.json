@@ -246,7 +246,7 @@
     },
     {
       "name": "opentelemetry-api",
-      "version": "1.45.0",
+      "version": "1.45.1",
       "lockfile": "requirements-mcp.lock.txt",
       "license_expression": "Apache-2.0",
       "license": null,
@@ -255,7 +255,7 @@
         "Repository, https://github.com/open-telemetry/opentelemetry-python"
       ],
       "license_files": [
-        "opentelemetry_api-1.45.0.dist-info/licenses/LICENSE"
+        "opentelemetry_api-1.45.1.dist-info/licenses/LICENSE"
       ]
     },
     {
@@ -487,7 +487,7 @@
     },
     {
       "name": "Pillow",
-      "version": "12.2.0",
+      "version": "13.0.0",
       "lockfile": "requirements-materials.lock.txt",
       "license_expression": "MIT-CMU",
       "license": null,
@@ -495,13 +495,25 @@
         "Release notes, https://pillow.readthedocs.io/en/stable/releasenotes/index.html",
         "Changelog, https://github.com/python-pillow/Pillow/releases",
         "Documentation, https://pillow.readthedocs.io",
-        "Funding, https://tidelift.com/subscription/pkg/pypi-pillow?utm_source=pypi-pillow&utm_medium=pypi",
-        "Homepage, https://python-pillow.github.io",
+        "Funding, https://tidelift.com/lifter/search/pypi/pillow",
+        "Homepage, https://python-pillow.org",
         "Mastodon, https://fosstodon.org/@pillow",
+        "Security, https://pillow.readthedocs.io/en/stable/handbook/security.html",
         "Source, https://github.com/python-pillow/Pillow"
       ],
       "license_files": [
-        "pillow-12.2.0.dist-info/licenses/LICENSE"
+        "pillow-13.0.0.dist-info/licenses/LICENSE"
+      ]
+    },
+    {
+      "name": "defusedxml",
+      "version": "0.7.1",
+      "lockfile": "requirements-materials.lock.txt",
+      "license_expression": null,
+      "license": "PSFL",
+      "project_urls": [],
+      "license_files": [
+        "defusedxml-0.7.1.dist-info/LICENSE"
       ]
     },
     {
@@ -593,8 +605,6 @@
         "packaging-26.3.dist-info/licenses/LICENSE.APACHE",
         "packaging-26.3.dist-info/licenses/LICENSE.BSD",
         "packaging/licenses/__init__.py",
-        "packaging/licenses/__pycache__/__init__.cpython-312.pyc",
-        "packaging/licenses/__pycache__/_spdx.cpython-312.pyc",
         "packaging/licenses/_spdx.py"
       ]
     },

@@ -21,7 +21,7 @@ import zipfile
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
-import xml.etree.ElementTree as ET
+import safe_xml as ET
 
 from assistant_api import APIError, atomic_json, read_json
 from batch_workflow import DraftBatch, _body, _json_path, _material_gaps, _partial_payment_gaps
@@ -393,12 +393,12 @@ def verify_workbook(path, plan):
     with zipfile.ZipFile(path) as archive:
         strings = []
         if 'xl/sharedStrings.xml' in archive.namelist():
-            strings = [''.join(t.text or '' for t in node.iter('{'+ns['x']+'}t')) for node in ET.fromstring(archive.read('xl/sharedStrings.xml'))]
-        sheets = ET.fromstring(archive.read('xl/workbook.xml')).find('x:sheets', ns)
+            strings = [''.join(t.text or '' for t in node.iter('{'+ns['x']+'}t')) for node in ET.from_zip(archive, 'xl/sharedStrings.xml')]
+        sheets = ET.from_zip(archive, 'xl/workbook.xml').find('x:sheets', ns)
         if [s.attrib['name'] for s in sheets] != [s['name'] for s in plan['sheets']]:
             raise APIError('delivery_excel_sheets', 'XLSX工作表名称、顺序或数量不同')
         for index, spec in enumerate(plan['sheets'], 1):
-            cells = {cell.attrib['r']: cell for cell in ET.fromstring(archive.read('xl/worksheets/sheet'+str(index)+'.xml')).findall('.//x:sheetData/x:row/x:c', ns)}
+            cells = {cell.attrib['r']: cell for cell in ET.from_zip(archive, 'xl/worksheets/sheet'+str(index)+'.xml').findall('.//x:sheetData/x:row/x:c', ns)}
             for row_index, row in enumerate(spec['rows'], 6):
                 for column_index, column in enumerate(spec['columns'], 1):
                     n, letters = column_index, ''

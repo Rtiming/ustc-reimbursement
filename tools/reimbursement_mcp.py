@@ -175,9 +175,9 @@ def create_server(service):
 
     @server.tool(annotations=read, structured_output=True)
     @expected_errors
-    def reimbursement_guide(topic: GuideTopic = 'start') -> dict[str, Any]:
-        """按需取得完整输入示例及操作说明：intake收件归档、planning规范维护与批次规划、export原生PDF、windows静默桥；quickstart总入口，standards规范体系，workflow财务顺序，materials材料要求。"""
-        return service.guide(topic)
+    def reimbursement_guide(topic: GuideTopic = 'start', language: Literal['zh', 'en'] = 'zh') -> dict[str, Any]:
+        """Read task guidance in Chinese or English / 按需读取中英文说明。language只影响文档，不改变权限、案件和请求。参数正本仍为tool_catalog。"""
+        return service.guide(topic, language)
 
     @server.tool(annotations=read, structured_output=True)
     @expected_errors

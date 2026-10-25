@@ -415,10 +415,13 @@ class AssistantService:
         result['system_write'] = False
         return result
 
-    def guide(self, topic='start'):
+    def guide(self, topic='start', language='zh'):
+        from assistant_contract import DOCS_EN, GUIDE_LANGUAGES
         if topic not in DOCS: raise APIError('unknown_guide', 'topic须为'+','.join(DOCS))
-        p = PROJECT / DOCS[topic]
-        return {'ok': True, 'topic': topic, 'path': str(p), 'text': p.read_text(encoding='utf-8'), 'system_write': False}
+        if language not in GUIDE_LANGUAGES:
+            raise APIError('unknown_language', 'language must be zh or en / 语言只支持zh或en')
+        p = PROJECT / (DOCS if language == 'zh' else DOCS_EN)[topic]
+        return {'ok': True, 'topic': topic, 'language': language, 'path': str(p), 'text': p.read_text(encoding='utf-8'), 'system_write': False}
 
     def capabilities(self, intent='materials'):
         from assistant_guidance import capabilities

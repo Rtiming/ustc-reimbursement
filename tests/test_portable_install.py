@@ -98,7 +98,7 @@ class PortableInstallTests(unittest.TestCase):
             self.assertTrue(row['url'].startswith('https://files.pythonhosted.org/packages/'))
             self.assertEqual(len(row['sha256']), 64)
             self.assertNotIn('latest', row['url'])
-            self.assertEqual(row['python'], '3.12.13')
+            self.assertEqual(row['python'], '3.12.15')
 
 
 if __name__ == '__main__':
