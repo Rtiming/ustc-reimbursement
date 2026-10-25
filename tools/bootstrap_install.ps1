@@ -1,5 +1,12 @@
 ﻿# 仅在当前进程配置路径；不写注册表、不改PowerShell或浏览器安全设置。
 $ErrorActionPreference = 'Stop'
+# 使用.NET原生SHA256，避免子进程继承PowerShell 7模块路径后缺少Get-FileHash。
+function Get-ReimbursementSha([string]$path) {
+    $stream = [IO.File]::OpenRead($path)
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { return ([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-', '').ToLowerInvariant() }
+    finally { $stream.Dispose(); $sha.Dispose() }
+}
 $toolRoot = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $toolRoot
 if ($args.Count -gt 0 -and $args[0] -eq '--check') {
@@ -17,9 +24,9 @@ if (-not $row.url.StartsWith('https://files.pythonhosted.org/packages/')) { thro
 $bootstrap = Join-Path $toolRoot ".local\bootstrap\$platform"
 New-Item -ItemType Directory -Force -Path $bootstrap | Out-Null
 $archive = Join-Path $bootstrap "uv-$($row.uv_version).zip"
-if (-not (Test-Path $archive) -or (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant() -ne $row.sha256) {
+if (-not (Test-Path $archive) -or (Get-ReimbursementSha $archive) -ne $row.sha256) {
     Invoke-WebRequest -UseBasicParsing -Uri $row.url -OutFile "$archive.part"
-    if ((Get-FileHash -Algorithm SHA256 -LiteralPath "$archive.part").Hash.ToLowerInvariant() -ne $row.sha256) { throw '下载SHA不符，停止执行' }
+    if ((Get-ReimbursementSha "$archive.part") -ne $row.sha256) { throw '下载SHA不符，停止执行' }
     Move-Item -Force -LiteralPath "$archive.part" -Destination $archive
 }
 Add-Type -AssemblyName System.IO.Compression.FileSystem

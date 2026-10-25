@@ -46,7 +46,7 @@ ALIASES = {
     'docs/报销规范与材料规则.md': 'distribution/材料与可选能力.md',
     'docs/材料整理与单面打印.md': 'distribution/材料与可选能力.md',
     'docs/报销总账与数据格式.md': 'distribution/材料与可选能力.md',
-    'templates/activity_approval/README.md': 'distribution/材料与可选能力.md',
+    'templates/activity_approval/README.md': 'distribution/activity-template.md',
     'docs/换设备与首次运行.md': 'docs/部署指南.md',
     'docs/财务PDF导出.md': 'distribution/财务操作与导出.md',
     'docs/Windows静默财务桥.md': 'distribution/财务操作与导出.md',

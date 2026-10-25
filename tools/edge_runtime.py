@@ -25,33 +25,9 @@ def file_lock(path):
     """OS持有锁；进程退出释放，不靠删除锁文件。"""
     if sys.platform not in ('darwin', 'win32'):
         raise UnsupportedPlatformError('unsupported_platform: 当前原生财务桥仅支持macOS或Windows；未执行浏览器操作')
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open('a+b') as lock:
-        if sys.platform == 'win32':
-            import msvcrt
-            if path.stat().st_size == 0:
-                lock.write(b'0'); lock.flush()
-            lock.seek(0)
-            try:
-                msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
-            except OSError as error:
-                raise RuntimeError('另一浏览器操作仍在执行；等待原任务，不并发回读或重发') from error
-            try:
-                yield
-            finally:
-                lock.seek(0)
-                msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
-            return
-        import fcntl
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            raise RuntimeError('另一浏览器操作仍在执行；等待原任务，不并发回读或重发')
-        try:
-            yield
-        finally:
-            fcntl.flock(lock, fcntl.LOCK_UN)
+    from platform_runtime import file_lock as local_file_lock
+    with local_file_lock(path, busy_message='另一浏览器操作仍在执行；等待原任务，不并发回读或重发'):
+        yield
 
 
 @contextmanager

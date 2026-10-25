@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tools'))
 from assistant_api import AssistantService, atomic_json, read_json
 from distribution_smoke import verify_members
-from edge_runtime import file_lock
+from platform_runtime import file_lock
 from setup_reimbursement_mcp import setup
 
 # 保留旧导入位置，使用统一工作区绑定与隔离环境。

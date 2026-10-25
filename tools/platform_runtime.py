@@ -5,6 +5,40 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from contextlib import contextmanager
+
+
+@contextmanager
+def file_lock(path, *, busy_message='原任务仍持有锁，请等待原任务完成'):
+    """共享OS文件锁；本地材料和安装不依赖财务桥支持的平台。"""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open('a+b') as lock:
+        if os.name == 'nt':
+            import msvcrt
+            if path.stat().st_size == 0:
+                lock.write(b'0')
+                lock.flush()
+            lock.seek(0)
+            try:
+                msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+            except OSError as error:
+                raise RuntimeError(busy_message) from error
+            try:
+                yield
+            finally:
+                lock.seek(0)
+                msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as error:
+                raise RuntimeError(busy_message) from error
+            try:
+                yield
+            finally:
+                fcntl.flock(lock, fcntl.LOCK_UN)
 
 
 def background_popen_kwargs():
