@@ -159,6 +159,8 @@ def checks(root, config, folder, *, ocr_smoke=False):
                 '--materials',
                 '--output',
                 str(output),
+                '--work-dir',
+                str(folder / 'smoke-work'),
             ]
             if ocr_smoke:
                 command.append('--ocr')

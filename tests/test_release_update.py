@@ -2,6 +2,7 @@
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import sys
 import subprocess
@@ -131,6 +132,24 @@ class UpdateTests(unittest.TestCase):
         with patch.object(update, 'fetch') as fetch:
             with self.assertRaises(ValueError): update.select_release('1.0.0', requested='../bad')
             fetch.assert_not_called()
+
+    @unittest.skipUnless(os.name == 'nt', '真实Windows cmd引号和参数传递')
+    def test_actual_windows_installer_in_chinese_space_path_receives_config(self):
+        version = '2.0.0-beta.1'; members = {}
+        with zipfile.ZipFile(io.BytesIO(self.raw)) as archive:
+            for name in ['README.md', 'data/distribution.json']:
+                members[name] = archive.read('ustc-reimbursement/' + name)
+        members['install.cmd'] = b'@echo off\r\nif not "%~1"=="--config" exit /b 41\r\nif not exist "%~2" exit /b 42\r\n> ".local\\self-check-current.json" echo {"ok":true}\r\nexit /b 0\r\n'
+        files = [{'path': n, 'size': len(raw), 'sha256': hashlib.sha256(raw).hexdigest()}for n,raw in sorted(members.items())]
+        members['MANIFEST.json'] = encoded({'version': version, 'private_data_included': False, 'source_tree_sha256': hashlib.sha256(encoded(files)).hexdigest(), 'files': files})
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, 'w') as archive:
+            for name,raw in members.items(): archive.writestr('ustc-reimbursement/' + name, raw)
+        self.raw = buffer.getvalue(); self.row = release(self.raw)
+        for name in ['新工具 with spaces', 'A&B']:
+            with patch.object(update, 'fetch', side_effect=self.fetch):
+                result = update.run(self.root, install=True, destination=self.root.parent / name)
+            self.assertTrue(result['ok']); self.assertEqual(result['phase'], 'installed')
 
 
 if __name__ == '__main__': unittest.main()

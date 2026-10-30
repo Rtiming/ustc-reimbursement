@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / 'tools'))
 import portable_install as installer
 from assistant_api import atomic_json
 from workspace_config import deployment_options, installation_config, read_installation
+from distribution_smoke import synthetic_workspace
 
 
 class DeploymentTests(unittest.TestCase):
@@ -24,6 +25,16 @@ class DeploymentTests(unittest.TestCase):
         for name in ['requirements-mcp.lock.txt', 'requirements-materials.lock.txt']:
             (self.root / name).write_text('example==1.0\n')
         self.manifest = {'version': '1.0.0', 'verification_mode': 'release_manifest', 'source_tree_sha256': 'a' * 64}
+
+    def test_synthetic_workspace_is_retained_on_success_and_failure_and_never_overwritten(self):
+        folder = self.root / 'synthetic-work'
+        with self.assertRaisesRegex(RuntimeError, 'original failure'):
+            with synthetic_workspace(folder) as work:
+                (Path(work) / 'receipt.json').write_text('{}')
+                raise RuntimeError('original failure')
+        self.assertEqual((folder / 'receipt.json').read_text(), '{}')
+        with self.assertRaises(FileExistsError):
+            with synthetic_workspace(folder): pass
 
     def test_declarative_config_is_fixed_typed_and_conflicts_fail(self):
         path = self.root / 'deploy.json'

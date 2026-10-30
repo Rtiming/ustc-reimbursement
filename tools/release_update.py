@@ -197,13 +197,15 @@ def run(root=ROOT, *, channel='current', version=None, download=False, install=F
             raise ValueError('原规范库丢失，先恢复原资料；更新不创建空白替代库')
         config = target / '.local/update-deployment.json'
         atomic_json(config, {'schema': 'ustc-deployment-v1', **options})
-        command = ['cmd.exe', '/d', '/c', str(target / 'install.cmd')] if os.name == 'nt' else ['sh', str(target / 'install.sh')]
+        command = ['cmd.exe', '/d', '/c', 'install.cmd'] if os.name == 'nt' else ['sh', str(target / 'install.sh')]
+        # cmd只消费固定相对参数；目标路径中的空格、&等字符留在cwd/JSON内，不拼入命令。
+        config_argument = str(Path('.local') / 'update-deployment.json') if os.name == 'nt' else str(config)
         log = target / '.local/update-install.log'
         result.update(ok=False, phase='installing', install_log=str(log))
         receipt = target / '.local/update-result.json'
         atomic_json(receipt, result)
         with log.open('w', encoding='utf-8') as output:
-            process = subprocess.run([*command, '--config', str(config)], cwd=target, stdout=output, stderr=subprocess.STDOUT, timeout=900)
+            process = subprocess.run([*command, '--config', config_argument], cwd=target, stdout=output, stderr=subprocess.STDOUT, timeout=900)
         status = target / '.local/self-check-current.json'
         if process.returncode or not status.is_file() or json.loads(status.read_text()).get('ok') is not True:
             result.update(phase='installation_incomplete', error='新目录安装未完成，原工具保留；查看install_log后接续同一更新目录')
