@@ -9,12 +9,24 @@ function Get-ReimbursementSha([string]$path) {
 }
 $toolRoot = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $toolRoot
-# 在下载、解包和--check执行前检查；边界脚本不执行Python或uv。
 & (Join-Path $PSScriptRoot 'bootstrap_boundary.ps1') -ToolRoot $toolRoot
-if ($args.Count -gt 0 -and $args[0] -eq '--check') {
+if ($args -contains '--help' -or $args -contains '-h') {
+    Write-Output '用法：install.cmd [--config 文件.json] [--data-dir 绝对目录] [--profile-id ID] [--title 名称] [--mode 场景] [--with-ocr] [--check] [--plan]'
+    Write-Output '--plan只读预览，需已有Python3.11+或已安装环境；--check只检查现有安装，均不下载。'
+    exit 0
+}
+if ($args -contains '--check' -or $args -contains '--plan') {
     $python = Join-Path $toolRoot '.local\mcp-venv\Scripts\python.exe'
-    if (-not (Test-Path -LiteralPath $python)) { throw '尚未安装；先运行install.cmd。自检不会联网安装。' }
-    & $python -X utf8 -I (Join-Path $toolRoot 'tools\portable_install.py') @args
+    if (-not (Test-Path -LiteralPath $python)) {
+        $candidate = Get-Command python.exe -ErrorAction SilentlyContinue
+        if ($args -notcontains '--plan' -or -not $candidate -or $candidate.Source -like '*\WindowsApps\*') {
+            throw '尚未安装；先运行install.cmd。自检不会联网安装。'
+        }
+        $python = $candidate.Source
+        & $python -B -I -c 'import sys;sys.exit(0 if sys.version_info >= (3,11) else 2)'
+        if ($LASTEXITCODE -ne 0) { throw '只读预览需要Python3.11+，本次未下载运行时。' }
+    }
+    & $python -B -X utf8 -I (Join-Path $toolRoot 'tools\portable_install.py') @args
     exit $LASTEXITCODE
 }
 $cpu = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }

@@ -1,5 +1,7 @@
 ﻿param([Parameter(Mandatory=$true)][string]$ToolRoot)
 $ErrorActionPreference = 'Stop'
+# 调用方可带末尾\.；只规范词法根路径，不解析或放宽任何运行链接目标。
+$ToolRoot = [IO.Path]::GetFullPath($ToolRoot)
 $stateRoot = Join-Path $ToolRoot '.local'
 $stateEntries = @(Get-ChildItem -LiteralPath $ToolRoot -Force | Where-Object { $_.Name -eq '.local' })
 if ($stateEntries.Count -gt 1) { throw 'Ambiguous runtime directory / 运行目录名称不唯一' }

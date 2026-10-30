@@ -90,12 +90,13 @@ class BootstrapBoundaryTests(unittest.TestCase):
                 self.assertEqual(made.returncode, 0, made.stderr)
 
             def check(allowed):
-                done = subprocess.run(['powershell.exe', '-NoProfile', '-File', str(root / 'tools/bootstrap_boundary.ps1'), '-ToolRoot', str(root)], capture_output=True, timeout=20)
-                if allowed:
-                    self.assertEqual(done.returncode, 0, done.stderr)
-                else:
-                    self.assertNotEqual(done.returncode, 0)
-                    self.assertIn(b'Runtime reparse point is not allowed', done.stderr)
+                for tool_root in (str(root), str(root) + '\\.'):
+                    done = subprocess.run(['powershell.exe', '-NoProfile', '-File', str(root / 'tools/bootstrap_boundary.ps1'), '-ToolRoot', tool_root], capture_output=True, timeout=20)
+                    if allowed:
+                        self.assertEqual(done.returncode, 0, done.stderr)
+                    else:
+                        self.assertNotEqual(done.returncode, 0)
+                        self.assertIn(b'Runtime reparse point is not allowed', done.stderr)
 
             for dest in (target, outside, other, base / 'missing'):
                 junction(alias, dest)

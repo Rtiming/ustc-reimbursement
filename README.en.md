@@ -4,7 +4,7 @@
 
 A local reimbursement assistant for people and AI agents: document intake and archiving, PDF/OCR, sourced policy profiles, CLI/JSON, and stdio MCP. The browser adapter targets the University of Science and Technology of China (USTC). This is an independent project, not an official university service.
 
-This is **0.5.0-beta.1**, a prerelease for isolated installation, document handling and interface evaluation. See the [bilingual release notes](docs/releases/v0.5.0-beta.1.md). **The real Windows finance workflow has not been tested.** Live approval, portal exports and the five-minute batch target are not certified. Existing 0.4 installations do not receive these security fixes automatically.
+This is **0.5.0-beta.2**, a prerelease for isolated installation, document handling and interface evaluation. See the [bilingual release notes](docs/releases/v0.5.0-beta.2.md). **The real Windows finance workflow has not been tested.** Live approval, portal exports and the five-minute batch target are not certified. Existing 0.4 installations do not receive these security fixes automatically.
 
 ## Install
 
@@ -63,3 +63,9 @@ Detail PDFs and the portal's native list export are separate actions. The owner 
 Only public source, blank defaults, and synthetic tests belong in this repository. Keep real cases, private policies, accounts, cookies, verification codes, and runtime logs local.
 
 Original code and documentation are licensed under [AGPL-3.0-or-later](LICENSE). Third-party packages and models retain their own licenses; see [third-party notices](THIRD_PARTY_NOTICES.en.md). The license does not grant access to university systems or establish reimbursement policy.
+
+## Updates and repeatable deployment
+
+Run `sh update.sh` to check, then `sh update.sh --install` to verify and install side by side. On Windows use `update.cmd`. Keep the old directory for existing cases and recovery; activate the new MCP fragment for new work. Older versions without the updater require one manual verified download first.
+
+`sh install.sh --config /absolute/path/deployment.local.json --plan` previews a deployment without installing. Copy `distribution/deployment.example.json` to start. See [deployment](docs/en/deployment.md) for full scope and migration limits.

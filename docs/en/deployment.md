@@ -70,3 +70,30 @@ Regenerate AI configuration on the receiver. A bridge migration must pass its ow
 | Bridge unavailable | Follow the [batch guide](batch-workflow.md); installation success does not prove login |
 
 The deployment pattern follows [uv's managed-Python guidance](https://docs.astral.sh/uv/guides/install-python/). Containerized or network-hosted finance automation is not a qualified deployment mode for this project.
+
+## Deployment files and a read-only plan
+
+Copy `distribution/deployment.example.json` to a private file. Optional `data_dir` must be an absolute path on this machine. Only schema, data_dir, profile_id, title, mode and with_ocr are supported. Conflicting CLI/file values fail explicitly. Credentials and commands are not accepted.
+
+```sh
+sh install.sh --config /absolute/path/deployment.local.json --plan
+sh install.sh --config /absolute/path/deployment.local.json
+sh install.sh --config /absolute/path/deployment.local.json --check
+```
+
+Use `install.cmd` on Windows. Planning requires an installed runtime or Python3.11+; it never downloads one. A plan does not create state or run probes. `--check` works in any argument position without installing. A successful installation records version, source-tree SHA and its acceptance receipt in deployed_source inside `.local/installation.json`. Failed installation does not advance that identity.
+
+## Updating a user installation
+
+```sh
+sh update.sh
+sh update.sh --install
+```
+
+Windows: `update.cmd` and `update.cmd --install`. The first command only checks this repository's public releases. The second verifies SHA256SUMS, the GitHub asset digest when present, all manifest hashes and exact ZIP membership, then installs and checks a separate version directory. Prerelease users follow the preview channel by default; stable users follow stable releases. Override with `--channel stable` or `--channel preview`. Use `--version vVERSION` for a specific release, `--destination ABSOLUTE_PATH` for the new directory or `--download` to only prepare verified files.
+
+The old installation and task evidence remain available. The bound material directory and profile are reused, and explicit local OCR remains enabled when previously configured. A verified destination can be resumed; unrelated existing directories are never overwritten. Only a successful fresh installation reports installed and a new MCP configuration. Merge that fragment and restart that service. Failed installation leaves logs under the new directory's `.local/update-install.log`.
+
+This is side-by-side preparation, not an in-place update or automatic activation. Cases, task history, finance login and private integrations are not migrated. Continue old cases and unknown actions from the old directory; use the new directory for new work. Retain the old directory if it contains the material root. Roll back by using its original entry point. Versions without the updater require a first manual verified download of this release.
+
+Synthetic self-check workspaces are retained alongside their reports for inspection. They are not immediately deleted while Windows may still hold log handles. Functional check failures still fail the installation.

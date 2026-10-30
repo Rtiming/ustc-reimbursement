@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from contextlib import contextmanager
 import hashlib
 import json
 from pathlib import Path
@@ -132,10 +133,23 @@ async def check_mcp(root, material, workspace):
         }
 
 
-def run(root=ROOT, with_mcp=False, with_materials=False, with_ocr=False):
+@contextmanager
+def synthetic_workspace(path=None):
+    # 状态完成不保证Windows日志句柄已全部释放；合成现场随回执保留，不终止进程或吞清理错误。
+    if path is None:
+        folder = Path(tempfile.mkdtemp(prefix='reimbursement-distribution-')).resolve()
+    else:
+        folder = Path(path)
+        if not folder.is_absolute():
+            raise ValueError('合成演练工作目录须为不存在的绝对目录')
+        folder.mkdir(parents=True, exist_ok=False)
+    yield str(folder)
+
+
+def run(root=ROOT, with_mcp=False, with_materials=False, with_ocr=False, work_dir=None):
     root = Path(root).resolve()
     manifest = verify_members(root)
-    with tempfile.TemporaryDirectory(prefix='reimbursement-distribution-') as temp_name:
+    with synthetic_workspace(work_dir) as temp_name:
         temp = Path(temp_name).resolve()
         material = temp / 'materials'
         material.mkdir()
@@ -323,6 +337,7 @@ def run(root=ROOT, with_mcp=False, with_materials=False, with_ocr=False):
             'materials': materials,
             'ocr': ocr,
             'synthetic_inputs_only': True,
+            'retained_synthetic_workspace': str(temp),
             'browser_actions_executed': False,
             'financial_write_executed': False,
             'all_ai_clients_tested': False,
@@ -337,10 +352,12 @@ def main():
         '--ocr', action='store_true', help='明确对合成图片运行已配置OCR；默认不执行'
     )
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--work-dir', type=Path, help='保留合成任务及回执的新目录；默认在output旁建立')
     args = parser.parse_args()
     if not args.output.is_absolute() or args.output.exists():
         raise ValueError('output须为尚不存在的绝对回执路径')
-    result = run(with_mcp=args.mcp, with_materials=args.materials, with_ocr=args.ocr)
+    result = run(with_mcp=args.mcp, with_materials=args.materials, with_ocr=args.ocr,
+                 work_dir=args.work_dir or args.output.with_name(args.output.stem + '-workspace'))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(
         json.dumps(result, ensure_ascii=False, indent=2) + '\n', encoding='utf-8'

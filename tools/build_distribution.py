@@ -42,6 +42,8 @@ ALIASES = {
     '.gitignore': 'distribution/gitignore',
     'install.sh': 'distribution/install.sh',
     'install.cmd': 'distribution/install.cmd',
+    'update.sh': 'distribution/update.sh',
+    'update.cmd': 'distribution/update.cmd',
     '安装与自检.command': 'distribution/安装与自检.command',
     'docs/用户指南.md': 'distribution/用户指南.md',
     'docs/助手快速开始.md': 'distribution/用户指南.md',
