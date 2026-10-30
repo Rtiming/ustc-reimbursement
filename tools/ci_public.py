@@ -41,7 +41,7 @@ def main():
               'archive_sha256': receipt['archive_sha256'], 'platform': platform.system(), 'machine': platform.machine()}
     try:
         commands = [
-            ('deployment-plan', [sys.executable, '-B', '-I', 'tools/portable_install.py', '--config', str(deployment), '--plan']),
+            ('deployment-plan', [sys.executable, '-B', '-X', 'utf8', '-I', 'tools/portable_install.py', '--config', str(deployment), '--plan']),
             ('install-ocr', install + ['--config', str(deployment)]),
             ('offline-check', install + ['--config', str(deployment), '--check']),
             ('update-launcher', update + ['--help']),
