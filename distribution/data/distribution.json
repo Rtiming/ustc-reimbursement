@@ -1,6 +1,6 @@
 {
   "schema": "ustc-distribution-v1",
-  "version": "0.5.0-beta.1",
+  "version": "0.5.0-beta.2",
   "python_min": "3.11",
   "audience": "同校经办人与支持本地工具的AI代理",
   "finance_adapter": "USTC only; local setup and live verification required",

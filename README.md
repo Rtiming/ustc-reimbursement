@@ -2,7 +2,7 @@
 
 [中文](README.md) | [English](README.en.md)
 
-当前版本为0.5.0-beta.1测试版，见[中英文发布说明](docs/releases/v0.5.0-beta.1.md)。Windows真实财务流程尚未实测；此测试版用于隔离安装、资料处理和接口试用，不代表真实批准、系统导出或5分钟整批目标已通过。旧0.4安装不会自动获得本版安全修复。
+当前版本为0.5.0-beta.2测试版，见[中英文发布说明](docs/releases/v0.5.0-beta.2.md)。Windows真实财务流程尚未实测；此测试版用于隔离安装、资料处理和接口试用，不代表真实批准、系统导出或5分钟整批目标已通过。旧0.4安装不会自动获得本版安全修复。
 
 面向经办人和AI代理的报销辅助工具：材料收件与归档、PDF与OCR、可追溯的共用规则和项目专项、CLI/JSON与stdio MCP，以及中国科大财务网页适配器。
 
@@ -66,3 +66,9 @@ Windows将入口换成`install.cmd`，路径换成本机绝对路径。平台前
 ## 许可证
 
 项目原创代码和文档采用[AGPL-3.0-or-later](LICENSE)，允许使用、修改和再分发，附带相应源码与许可义务。通过网络提供修改后的版本时应按许可证向使用者提供对应源码。依赖PyMuPDF采用AGPL/商业双许可；其他依赖和模型各自适用原许可，见[第三方说明](THIRD_PARTY_NOTICES.md)。
+
+## 更新与重复部署
+
+`sh update.sh`检查版本，`sh update.sh --install`核验后在新目录安装；Windows使用`update.cmd`。旧目录保留已有案件和恢复现场，新工作使用新MCP片段。没有更新入口的旧版先手动核SHA下载本版一次。
+
+`sh install.sh --config /绝对路径/deployment.local.json --plan`只读预览部署；配置可从`distribution/deployment.example.json`复制。完整范围及案件迁移限制见[部署指南](docs/部署指南.md)。

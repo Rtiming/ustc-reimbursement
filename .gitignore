@@ -27,6 +27,8 @@
 !/reimburse.py
 !/install.sh
 !/install.cmd
+!/update.sh
+!/update.cmd
 !/安装与自检.command
 !/requirements*.txt
 !/requirements-ocr.in

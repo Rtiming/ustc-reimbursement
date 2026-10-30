@@ -4,12 +4,29 @@ set -eu
 REIMBURSE_INSTALL_ROOT=$(CDPATH= cd -P -- "$(dirname -- "$0")/.." && pwd -P)
 cd "$REIMBURSE_INSTALL_ROOT"
 sh tools/bootstrap_boundary.sh "$REIMBURSE_INSTALL_ROOT"
-if [ "${1:-}" = "--check" ]; then
-    if [ ! -x .local/mcp-venv/bin/python ]; then
+REIMBURSE_CHECK_ONLY=0
+REIMBURSE_PLAN_ONLY=0
+for REIMBURSE_ARG in "$@"; do
+    case "$REIMBURSE_ARG" in
+        --check) REIMBURSE_CHECK_ONLY=1 ;;
+        --plan) REIMBURSE_PLAN_ONLY=1 ;;
+        --help|-h)
+            printf '%s\n' '用法：install.sh [--config 文件.json] [--data-dir 绝对目录] [--profile-id ID] [--title 名称] [--mode 场景] [--with-ocr] [--check] [--plan]' \
+                '--plan只读预览，需已有Python3.11+或已安装环境；--check只检查现有安装，均不下载。'
+            exit 0 ;;
+    esac
+done
+if [ "$REIMBURSE_CHECK_ONLY" = 1 ] || [ "$REIMBURSE_PLAN_ONLY" = 1 ]; then
+    if [ -x .local/mcp-venv/bin/python ]; then
+        exec .local/mcp-venv/bin/python -B -X utf8 -I tools/portable_install.py "$@"
+    fi
+    if [ "$REIMBURSE_PLAN_ONLY" = 1 ] && command -v python3 >/dev/null 2>&1 && \
+        python3 -B -I -c 'import sys;sys.exit(0 if sys.version_info >= (3,11) else 2)'; then
+        exec python3 -B -X utf8 -I tools/portable_install.py "$@"
+    else
         printf '%s\n' '尚未安装；先运行 sh install.sh。自检不会联网安装。' >&2
         exit 2
     fi
-    exec .local/mcp-venv/bin/python -X utf8 -I tools/portable_install.py "$@"
 fi
 case "$(uname -s)-$(uname -m)" in
     Darwin-arm64) REIMBURSE_INSTALL_PLATFORM=darwin-arm64 ;;

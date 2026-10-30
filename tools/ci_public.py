@@ -30,13 +30,21 @@ def main():
     python = package / '.local/mcp-venv' / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
     install = (['cmd.exe', '/d', '/c', 'install.cmd']
                if os.name == 'nt' else ['sh', str(package / 'install.sh')])
+    update = (['cmd.exe', '/d', '/c', 'update.cmd']
+              if os.name == 'nt' else ['sh', str(package / 'update.sh')])
+    deployment = reports / 'deployment.json'
+    deployment.write_text(json.dumps({'schema': 'ustc-deployment-v1',
+        'data_dir': str(package / '材料 with spaces'), 'profile_id': 'deployment_ci',
+        'title': 'Portable acceptance', 'mode': 'student_activity', 'with_ocr': True}, ensure_ascii=False), encoding='utf-8')
     steps = []
     result = {'ok': False, 'steps': steps, 'browser_actions_executed': False,
               'archive_sha256': receipt['archive_sha256'], 'platform': platform.system(), 'machine': platform.machine()}
     try:
         commands = [
-            ('install-ocr', install + ['--with-ocr']),
-            ('offline-check', install + ['--check']),
+            ('deployment-plan', [sys.executable, '-B', '-I', 'tools/portable_install.py', '--config', str(deployment), '--plan']),
+            ('install-ocr', install + ['--config', str(deployment)]),
+            ('offline-check', install + ['--config', str(deployment), '--check']),
+            ('update-launcher', update + ['--help']),
             ('regression', [str(python), '-m', 'unittest', 'discover', '-s', 'tests', '-p', 'test_*.py']),
             ('native-bridge-contract', ['node', 'tests/test_native_bridge.cjs']),
             ('native-exports-contract', ['node', 'tests/test_system_print.cjs']),
@@ -48,6 +56,8 @@ def main():
             with (reports / (name + '.log')).open('w', encoding='utf-8') as log:
                 process = subprocess.run(command, cwd=package, env=env, stdout=log, stderr=subprocess.STDOUT, timeout=900)
             steps.append({'name': name, 'returncode': process.returncode})
+            if name == 'deployment-plan' and (package / '.local').exists():
+                raise ValueError('只读部署计划创建了安装状态')
             if process.returncode:
                 print((reports / (name + '.log')).read_text(encoding='utf-8')[-16000:])
                 return 1
