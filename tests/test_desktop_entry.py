@@ -1,5 +1,6 @@
 """实际Windows .lnk创建、只读核验及用户原入口保护；不启动浏览器。"""
 import os
+import shutil
 from pathlib import Path
 import sys
 import tempfile
@@ -15,7 +16,7 @@ class DesktopEntryTests(unittest.TestCase):
     def setUp(self):
         temp=tempfile.TemporaryDirectory();self.addCleanup(temp.cleanup);self.root=Path(temp.name)/'中文 工具';self.desktop=Path(temp.name)/'桌面'
         (self.root/'.local/mcp-venv/Scripts').mkdir(parents=True);(self.root/'tools').mkdir();self.desktop.mkdir()
-        (self.root/'.local/mcp-venv/Scripts/pythonw.exe').write_bytes(b'')
+        shutil.copyfile(sys.executable,self.root/'.local/mcp-venv/Scripts/pythonw.exe')
         (self.root/'tools/operator_workbench.py').write_text('# synthetic',encoding='utf-8')
 
     def test_actual_link_readback_repeat_and_missing_repair(self):

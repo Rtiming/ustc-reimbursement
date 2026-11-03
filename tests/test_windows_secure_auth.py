@@ -31,6 +31,18 @@ def packet():
 
 
 class AuthProtocolTests(unittest.TestCase):
+    def test_canonical_pipe_acl_keeps_exact_private_principals(self):
+        user = 'S-1-5-21-123-1001'
+        rows = [(0, 0, 0x10000000, sid) for sid in (user, 'S-1-5-18', 'S-1-5-32-544')]
+        self.assertTrue(pipes.private_pipe_acl_matches(0x1000, rows, user))
+        mapped = [(kind, flags, 0x1f01ff, sid) for kind, flags, mask, sid in rows]
+        self.assertTrue(pipes.private_pipe_acl_matches(0x1000, mapped, user))
+        for bad in [rows + [rows[0]], rows[:2], [(0, 0, 0x10000000, 'S-1-1-0')] + rows[1:],
+                    [(1, 0, 0x10000000, user)] + rows[1:], [(0, 2, 0x10000000, user)] + rows[1:],
+                    [(0, 0, 0x12019f, user)] + rows[1:]]:
+            self.assertFalse(pipes.private_pipe_acl_matches(0x1000, bad, user))
+        self.assertFalse(pipes.private_pipe_acl_matches(0, rows, user))
+
     def test_only_authorized_fixed_request_and_secret_free_intent(self):
         value=protocol.validate(packet())
         self.assertNotIn(SENTINEL,json.dumps(protocol.intent(value),ensure_ascii=False))

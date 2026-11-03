@@ -62,8 +62,9 @@ class NativeStageTests(unittest.TestCase):
             return run(self.input,self.output,runtime=self.runtime)
 
     def readback(self):
-        return {'phase':'script_completed','executed_at_utc':(datetime.now(timezone.utc)+timedelta(seconds=1)).isoformat(),
-            'dispatch_intent_at_utc':datetime.now(timezone.utc).isoformat(),
+        saved = datetime.fromisoformat(read_json(self.output)['executed_at_utc'])
+        return {'phase':'script_completed','executed_at_utc':(saved+timedelta(seconds=2)).isoformat(),
+            'dispatch_intent_at_utc':(saved+timedelta(seconds=1)).isoformat(),
             'result':{'ok':True,'complete':True,'business_transport':'native_http','action':'bill-read','domain':'basic',
                 'system_write':False,'case_id':'fixture','serial':'123','expected_userid':'TEST001',
                 'bill':{'t.serial_no':'123','t.REQ_INFO':'TEST001-Fixture','t.total_amt':'10.00'},
