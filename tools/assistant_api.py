@@ -630,7 +630,7 @@ class AssistantService:
         from applicant_http_batch import run,manifest as validate_manifest
         from registered_inputs import checked_reference
         from finance_native_create import frozen
-        from edge_runtime import file_lock
+        from platform_runtime import file_lock
         if not isinstance(execute,bool)or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,95}',str(request_id))or not re.fullmatch(r'\d+',str(tab_id)):raise APIError('applicant_batch_arguments','须明确原批次、tab和稳定请求号')
         validate_manifest(self,manifest,case_id)
         root=self.root/'.local/applicant_batches'/manifest['sha256'];root.mkdir(parents=True,exist_ok=True)
