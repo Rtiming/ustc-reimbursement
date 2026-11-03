@@ -17,6 +17,7 @@ from finance_backend import mac_native_enabled, mac_target, transport_identity, 
 ROOT = Path(__file__).resolve().parents[1]
 ENTRY = 'https://cwzh.ustc.edu.cn/WFManager/home2.jsp'
 ORIGINS = ['https://cwzh.ustc.edu.cn', 'http://cwzh.ustc.edu.cn', 'https://id.ustc.edu.cn']
+KNOWN_PATHS = {'/', '/WFManager/home2.jsp', '/YBX/main.jsp', '/YBX/main2.jsp', '/YBX/login.html'}
 
 ERROR_MESSAGES = {
     'bridge_timeout': 'Edge原生桥接超时；仅回读原意图，不重发登录。',
@@ -176,13 +177,13 @@ def tab_origin(tab_id):
         from mac_edge_bridge import tab_origin as native_origin
         result = native_origin(tab_id, **mac_target())
         return {'tab_id':tab_id,'origin':result['origin'],'allowed_origin':result['origin'] in ORIGINS,
-                'known_path':result['pathname'] if result['pathname'] in ['/','/WFManager/home2.jsp','/YBX/main.jsp','/YBX/login.html'] else None,
+                'known_path':result['pathname'] if result['pathname'] in KNOWN_PATHS else None,
                 'page_script_executed':False,'system_write':False}
     if sys.platform == 'win32':
         from windows_edge_bridge import request
         result = request('tab-origin', {'tab_id': tab_id})
         return {'tab_id': tab_id, 'origin': result['origin'], 'allowed_origin': result['origin'] in ORIGINS,
-                'known_path': result['pathname'] if result['pathname'] in ['/','/WFManager/home2.jsp','/YBX/main.jsp','/YBX/login.html'] else None,
+                'known_path': result['pathname'] if result['pathname'] in KNOWN_PATHS else None,
                 'page_script_executed': False, 'system_write': False}
     apple='''if application "Microsoft Edge" is not running then error "EdgeNotRunning"
 with timeout of 5 seconds
@@ -203,16 +204,42 @@ end timeout'''.replace('TAB_ID',json.dumps(tab_id))
         raise AccessError('bridge_invalid_response','tabs') from None
     pathname=u.path.split(';')[0] or '/'
     return {'tab_id':tab_id,'origin':origin,'allowed_origin':origin in ORIGINS,
-            'known_path':pathname if pathname in ['/','/WFManager/home2.jsp','/YBX/main.jsp','/YBX/login.html'] else None,
+            'known_path':pathname if pathname in KNOWN_PATHS else None,
             'page_script_executed':False,'system_write':False}
 
 
 def tab_error_surface(tab_id):
-    """仅针对登录来源故障读取错误页身份；不读取表单、业务正文、凭据或执行动作。"""
+    """读取错误页及固定首页入口结构；不读取输入值、SSO参数值或执行导航。"""
     native=tab_origin(tab_id)
     if not native['allowed_origin']:
         return {**native,'error_surface_read':False}
-    source="location.origin!=='null'?JSON.stringify({origin:location.origin}):JSON.stringify({origin:location.origin,title:document.title,errorCode:document.querySelector('.error-code')?.innerText||null,errorMessage:document.getElementById('main-message')?.innerText||null,heading:document.querySelector('h1')?.innerText||null})"
+    source=r'''JSON.stringify((()=>{
+ if(location.origin==='null')return {origin:location.origin,title:document.title,errorCode:document.querySelector('.error-code')?.innerText||null,errorMessage:document.getElementById('main-message')?.innerText||null,heading:document.querySelector('h1')?.innerText||null};
+ const result={origin:location.origin};
+ if(location.origin==='https://cwzh.ustc.edu.cn'&&location.pathname==='/YBX/login.html'){
+  result.loginShell={title:document.title,text:(document.body?.innerText||'').slice(0,600)};return result;
+ }
+ if(location.origin!=='https://cwzh.ustc.edu.cn'||location.pathname.replace(/;jsessionid=[^/]+/ig,'')!=='/WFManager/home2.jsp')return result;
+ // 仅记录固定入口的结构；href查询参数及内联函数实参可能含登录票据，不落盘。
+ const nodes=[...document.querySelectorAll('a,button,[onclick]')].filter(e=>e.getClientRects().length&&e.textContent.trim()==='智能报销');
+ const leaf=nodes.filter(e=>!nodes.some(x=>x!==e&&e.contains(x)));
+ result.financeEntry={count:leaf.length,candidates:leaf.slice(0,5).map(e=>{
+  let route=null;try{const u=new URL(e.getAttribute('href')||'',location.href);if(['https:','http:'].includes(u.protocol))route={origin:u.origin,path:u.pathname.split(';')[0]};}catch(_){}
+  const handler=e.getAttribute('onclick')||'',href=e.getAttribute('href')||'';
+  const calls=text=>[...text.matchAll(/([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*\(/g)].map(m=>m[1]).slice(0,10);
+  const project=href.match(/^javascript:\s*navToPrj\(\s*['"]([A-Za-z0-9_]{1,64})['"]\s*\)\s*;?$/),container=project?document.getElementById(project[1]):null;
+  let nativeRoute=null;const raw=container?.getAttribute('url')||'',mode=raw.startsWith('WINOPEN')?'WINOPEN':raw.startsWith('ERPURL')?'ERPURL':'frame';
+  try{const u=new URL(raw.replace(/^(WINOPEN|ERPURL)/,''),location.href);nativeRoute={mode,origin:u.origin,path:u.pathname.split(';')[0],queryKeys:[...u.searchParams.keys()]};}catch(_){}
+  return {tag:e.tagName,id:e.id,target:e.getAttribute('target'),route,handlerCalls:calls(handler),javascriptHref:/^javascript:/i.test(href),hrefCalls:calls(href),project:project?.[1]||null,nativeRoute,knownBusinessRoutes:['/YBX/main.jsp','/WFManager/home2.jsp'].filter(p=>href.includes(p))};
+ })};
+ result.serviceEntries=[...document.querySelectorAll('a')].filter(e=>e.getClientRects().length&&e.textContent.trim()).flatMap(e=>{
+  const m=(e.getAttribute('href')||'').match(/^javascript:\s*navToPrj\(\s*['"]([A-Za-z0-9_]{1,64})['"]\s*\)\s*;?$/);if(!m)return[];
+  const raw=document.getElementById(m[1])?.getAttribute('url')||'',mode=raw.startsWith('WINOPEN')?'WINOPEN':raw.startsWith('ERPURL')?'ERPURL':'frame';
+  let route=null;try{const u=new URL(raw.replace(/^(WINOPEN|ERPURL)/,''),location.href);route={mode,origin:u.origin,path:u.pathname.split(';')[0],queryKeys:[...u.searchParams.keys()]};}catch(_){}
+  return[{label:e.textContent.trim().slice(0,80),project:m[1],nativeRoute:route}];
+ }).slice(0,80);
+ return result;
+})())'''
     apple='''if application "Microsoft Edge" is not running then error "EdgeNotRunning"
 with timeout of 5 seconds
 tell application "Microsoft Edge"
@@ -223,7 +250,7 @@ end repeat
 end repeat
 error "Finance tab missing" number -27001
 end tell
-end timeout'''.replace('TAB_ID',json.dumps(tab_id)).replace('SOURCE',json.dumps(source))
+end timeout'''.replace('TAB_ID',json.dumps(tab_id)).replace('SOURCE',json.dumps(source,ensure_ascii=False))
     if mac_native_enabled():
         from mac_edge_bridge import evaluate as native_evaluate
         data=json.loads(native_evaluate(source, tab_id, access=True, **mac_target()))
@@ -232,7 +259,7 @@ end timeout'''.replace('TAB_ID',json.dumps(tab_id)).replace('SOURCE',json.dumps(
         data=json.loads(windows_evaluate(source, tab_id, access=True))
     else:
         data=json.loads(bridge_run(apple,'inspect'))
-    return {**native,'error_surface_read':True,'page_script_executed':True,'document_origin':data.get('origin'),'document_title':data.get('title'),'error_code':data.get('errorCode'),'error_message':data.get('errorMessage'),'heading':data.get('heading')}
+    return {**native,'error_surface_read':True,'page_script_executed':True,'document_origin':data.get('origin'),'document_title':data.get('title'),'error_code':data.get('errorCode'),'error_message':data.get('errorMessage'),'heading':data.get('heading'),'finance_entry':data.get('financeEntry'),'service_entries':data.get('serviceEntries'),'login_shell':data.get('loginShell')}
 
 
 
@@ -262,11 +289,43 @@ SNAPSHOT = r'''JSON.stringify((()=>{
  return {state:business?(project==='WF_YBX'?'ready':'finance_loading'):(financeOrigin&&pathname==='/WFManager/home2.jsp'?'finance_home':'finance_unknown_path'),path,login_verified:business&&project==='WF_YBX'};
 })())'''
 
+CAS_CONTRACT_SNAPSHOT = r'''JSON.stringify((()=>{
+ if(location.origin!=='https://id.ustc.edu.cn'||location.pathname!=='/cas/login')throw Error('wrong_login_page');
+ const route=value=>{try{const u=new URL(value,location.href);return{origin:u.origin,path:u.pathname};}catch(_){return null;}};
+ return {state:'cas_contract',forms:[...document.forms].map(f=>({id:f.id,method:f.method,action:route(f.action),fields:[...f.elements].map(e=>({tag:e.tagName,id:e.id,name:e.name,type:e.type}))})),
+ scripts:[...document.scripts].filter(e=>e.src).map(e=>route(e.src)),
+ loaded_scripts:performance.getEntriesByType('resource').filter(e=>e.name.startsWith(location.origin+'/gate/public/cas-login-new/')&&e.name.endsWith('.js')).map(e=>route(e.name)),
+ crypto_ready:!!globalThis.CryptoJS?.AES,flow_key_present:!!document.getElementById('login-croypto')?.textContent,
+ credential_values_read:false};
+})())'''
+
+
+def cas_contract_snapshot(tab_id):
+    """认证适配维护：仅读表单及公开脚本定位，不返回输入值或会话参数。"""
+    return evaluate(tab_id, CAS_CONTRACT_SNAPSHOT)
+
 OFFICIAL_ENTRY_NAVIGATION = r'''JSON.stringify((()=>{
  const pathname=location.pathname.replace(/;jsessionid=[^/]+/ig,'');
  if(!['https://cwzh.ustc.edu.cn','http://cwzh.ustc.edu.cn'].includes(location.origin)||pathname!=='/YBX/login.html')throw new Error('wrong_finance_login_entry');
  location.assign('https://cwzh.ustc.edu.cn/WFManager/home2.jsp');
  return {state:'official_finance_entry_opened',login_verified:false};
+})())'''
+
+
+FINANCE_ENTRY = r'''JSON.stringify((()=>{
+ const path=location.pathname.replace(/;jsessionid=[^/]+/ig,'');
+ if(location.origin!=='https://cwzh.ustc.edu.cn'||path!=='/WFManager/home2.jsp')throw new Error('wrong_origin');
+ const entries=[...document.querySelectorAll('a')].filter(e=>e.textContent.trim()==='智能报销'&&e.getClientRects().length);
+ if(entries.length!==1||!/^javascript:\s*navToPrj\(\s*['"]YBX['"]\s*\)\s*;?$/.test(entries[0].getAttribute('href')||''))
+  return {state:'finance_entry_required',matches:entries.length};
+ const raw=document.getElementById('YBX')?.getAttribute('url')||'';
+ if(!raw.startsWith('WINOPEN'))throw Error('finance_entry_contract_changed');
+ const target=new URL(raw.slice(7),location.href),keys=[...target.searchParams.keys()].sort();
+ if(target.origin!==location.origin||target.pathname!=='/YBX/main2.jsp'||target.username||target.password||
+    JSON.stringify(keys)!==JSON.stringify(['context','pId'])||keys.some(k=>!target.searchParams.get(k)))throw Error('finance_entry_contract_changed');
+ // 复用首页签发的原生会话入口；票据只留浏览器内存，不输出或另存。
+ location.assign(target.href);
+ return {state:'finance_entry_opened',transport:'native_entry_url',ui_actions_executed:false};
 })())'''
 
 
@@ -333,13 +392,26 @@ def ensure(tab_id, request_id, output, username='', password='', timeout=35, for
         s = snapshot(tab_id)
         if navigated and s['state'] == 'finance_home':
             fresh = [id_ for id_ in tabs() if id_ not in original_tabs]
-            ready = [id_ for id_ in fresh if snapshot(id_)['state'] == 'ready']
+            observed = [(id_, snapshot(id_)) for id_ in fresh]
+            record['entry_tab_observations'] = [{'tab_id': id_, 'state': value['state'],
+                'login_verified': value.get('login_verified') is True} for id_, value in observed]
+            ready = [(id_, value) for id_, value in observed if value['state'] == 'ready']
             if len(ready) == 1:
-                record.update(result=snapshot(ready[0]), finance_tab_id=ready[0])
+                record.update(observed_at_utc=stamp(), result=ready[0][1], finance_tab_id=ready[0][0])
                 write(output, record)
-                return dict(record['result'], tab_id=ready[0], output=str(output), system_write=False)
+                return dict(record['result'], tab_id=ready[0][0], output=str(output), system_write=False)
             if len(ready) > 1:
-                return {'state': 'select_finance_tab', 'tab_ids': ready, 'system_write': False}
+                write(output, record)
+                return {'state': 'select_finance_tab', 'tab_ids': [x[0] for x in ready], 'system_write': False}
+            rejected = [(id_, value) for id_, value in observed if value['state'] == 'finance_login_entry']
+            if len(observed) == 1 and len(rejected) == 1:
+                # 新标签已明确退回登录壳；保留原入口意图，不能再点击首页形成开页循环。
+                result = dict(state='finance_entry_rejected', tab_id=str(tab_id),
+                    entry_tab_id=rejected[0][0], entry_tab_state='finance_login_entry',
+                    login_verified=False, output=str(output), system_write=False)
+                record.update(observed_at_utc=stamp(), result=result)
+                write(output, record)
+                return result
         record.update(observed_at_utc=stamp(), result=s)
         write(output, record)
         if s['state'] == 'ready':
@@ -378,15 +450,19 @@ def ensure(tab_id, request_id, output, username='', password='', timeout=35, for
                 evaluate(tab_id, "JSON.stringify((()=>{const path=location.pathname;location.replace('https://cwzh.ustc.edu.cn'+path);return {state:'secure_finance_entry'};})())", stage='official_entry')
                 time.sleep(.5)
                 continue
-            record['entry_tabs_before'] = list(original_tabs)
+            original_tabs = set(tabs())
+            record['entry_tabs_before'] = sorted(original_tabs)
             record['finance_entry_opened'] = True
             write(output, record)
-            result = evaluate(tab_id, r'''JSON.stringify((()=>{if(location.origin!=='https://cwzh.ustc.edu.cn')throw new Error('wrong_origin');const vis=e=>e.getClientRects().length;const candidates=[...document.querySelectorAll('a,button,[onclick]')].filter(e=>vis(e)&&e.textContent.trim()==='智能报销');const leaf=candidates.filter(e=>!candidates.some(x=>x!==e&&e.contains(x)));if(leaf.length!==1)return {state:'finance_entry_required',matches:leaf.length};leaf[0].click();return {state:'finance_entry_opened'};})())''', stage='finance_entry')
+            result = evaluate(tab_id, FINANCE_ENTRY, stage='finance_entry')
+            record['finance_entry_result'] = result
+            write(output, record)
             navigated = True
-            if result['state'] == 'finance_entry_required':
-                return dict(s, state='finance_entry_required', tab_id=str(tab_id), output=str(output), system_write=False)
+            if result['state'] != 'finance_entry_opened':
+                return dict(s, state=result['state'], tab_id=str(tab_id), output=str(output), system_write=False)
         if time.monotonic() >= deadline:
-            return dict(s, state='login_pending', tab_id=str(tab_id), output=str(output), system_write=False)
+            return dict(s, state='finance_entry_pending' if navigated and s['state']=='finance_home' else 'login_pending',
+                        tab_id=str(tab_id), output=str(output), system_write=False)
         time.sleep(.5)
 
 
@@ -491,11 +567,12 @@ def run(args):
                 print(json.dumps(dict(ok=observed['state']=='ready', **observed), ensure_ascii=False))
                 return 0 if observed['state']=='ready' else 2
         if conf.get('credential_reference') and not args.with_credentials:
-            credential_cli = Path.home() / '.ai-skills/rtime-credentials/scripts/cli.py'
+            from credential_provider import invocation
+            credential_command,credential_environment = invocation(conf)
             use = {'bindings': {name: {'reference': conf['credential_reference'], 'field': field} for name, field in [('FINANCE_CAS_USERNAME', 'username'), ('FINANCE_CAS_PASSWORD', 'password')]},
                    'argv': [sys.executable, str(Path(__file__).resolve()), 'ensure', '--tab-id', tab, '--request-id', args.request_id, '--output', str(args.output.resolve()), '--with-credentials', *(['--foreground'] if args.foreground else [])], 'timeout': 55}
             try:
-                child = subprocess.run([sys.executable, str(credential_cli), 'use'], input=json.dumps(use), text=True, capture_output=True, timeout=60)
+                child = subprocess.run(credential_command, input=json.dumps(use), text=True, capture_output=True, env=credential_environment, timeout=60)
                 wrapped = json.loads(child.stdout)
             except (subprocess.TimeoutExpired, ValueError, OSError):
                 raise AccessError('credential_unavailable', 'credentials') from None
@@ -513,6 +590,15 @@ def run(args):
                     failure = {}
                 if isinstance(failure, dict) and failure.get('state') == 'access_error':
                     raise AccessError(failure.get('error_code'), failure.get('error_stage'))
+                if isinstance(failure, dict) and failure.get('state') in {
+                        'login_pending','challenge_required','login_error','finance_entry_pending',
+                        'finance_entry_rejected','finance_entry_required','finance_entry_failed','finance_entry_unknown'}:
+                    safe = dict(ok=False,state=failure['state'],tab_id=tab,output=str(args.output),
+                                login_verified=False,system_write=False)
+                    if isinstance(failure.get('entry_tab_id'),str) and re.fullmatch(r'[0-9]+',failure['entry_tab_id']):
+                        safe['entry_tab_id']=failure['entry_tab_id']
+                    print(json.dumps(safe,ensure_ascii=False))
+                    return 2
                 raise AccessError('access_failed', 'credentials')
             print(r['stdout'].strip())
             return 0
@@ -523,7 +609,7 @@ def run(args):
         with browser_lock():
             result = ensure(tab, args.request_id, args.output, username, password)
     print(json.dumps(dict(ok=result['state'] == 'ready', **result), ensure_ascii=False))
-    return 0
+    return 0 if result['state'] == 'ready' else 2
 
 
 def persist_failure(args, result):

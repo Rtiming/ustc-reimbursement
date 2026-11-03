@@ -756,6 +756,8 @@ def standards_read(service, library_root, profile_id=None):
         return {
             'ok': True,
             'profiles': entry,
+            'library_root':str(root),
+            'registry_sha256':hashlib.sha256((root/'registry.json').read_bytes()).hexdigest(),
             'system_write': False,
             'next_action': {
                 'tool': 'reimbursement_standards_read',
@@ -766,6 +768,7 @@ def standards_read(service, library_root, profile_id=None):
         }
     return {
         'ok': True,
+        'library_root':str(root),
         'profile': profile,
         'sha256': profile_sha256,
         'system_write': False,

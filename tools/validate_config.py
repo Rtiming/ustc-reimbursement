@@ -40,8 +40,14 @@ def validate_corporate_payments(payments, total):
         raise ValueError('对公付款须为非空列表')
     identities, users = [], set()
     for p in payments:
+        if isinstance(p, dict) and p.get('mode') == 'bank_transfer':
+            if (not isinstance(p.get('name'),str) or not p['name'].strip()
+                    or not re.fullmatch(r'[A-Za-z0-9]+',p.get('person_id','')) or money(p.get('amount'))<=0
+                    or any(k in p for k in ['bank_account','bank_name'])):
+                raise ValueError('混合支付个人收款须姓名、工号及正金额，银行卡从原生候选核实')
+            continue
         if not isinstance(p, dict) or p.get('mode') != 'corporate_transfer':
-            raise ValueError('对公转账不支持混合支付')
+            raise ValueError('对公混合支付只支持个人转卡和对公转账')
         for key in ['name', 'bank_name']:
             if (not isinstance(p.get(key), str) or not p[key].strip()
                     or p[key] != p[key].strip() or re.search(r'[\x00-\x1f\x7f]', p[key])):
@@ -66,6 +72,8 @@ def validate_corporate_payments(payments, total):
                 or re.search(r'[\x00-\x1f\x7f]', p['remark'])):
             raise ValueError('对公附言须为不超过25字符单位的单行短文本')
         identities.append((p['name'], p['bank_name'], account.replace(' ', '')))
+    personal=[p['person_id'] for p in payments if p['mode']=='bank_transfer']
+    if len(personal)!=len(set(personal)):raise ValueError('混合支付个人收款重复')
     if len(users) != 1:
         raise ValueError('对公付款的本案登录工号须一致')
     if len(identities) != len(set(identities)) or len({x[2] for x in identities}) != len(identities):
@@ -76,6 +84,11 @@ def validate_corporate_payments(payments, total):
 
 
 def validate(c):
+    if c.get('system_mode')=='remuneration':
+        from finance_remuneration_save import validate_bound_case
+        validate_bound_case(c);validate_basic_fields(c.get('basic',{}))
+        if c.get('payments')or c.get('pre_review')or len(c.get('funding',[]))!=1 or money(c['funding'][0]['amount'])!=money(c['amount']):raise ValueError('薪酬须本项单经费、无重复普通转卡及额外预审')
+        return c
     if c.get('system_mode', 'daily') != 'daily':
         raise ValueError('系统模式尚未实测接通：'+str(c['system_mode']))
     if not c.get('case_id') or not isinstance(c.get('serial'), str) or not re.fullmatch(r'\d+', c['serial']):
@@ -97,12 +110,12 @@ def validate(c):
     corporate = any(p.get('mode') == 'corporate_transfer' for p in c['payments'])
     if corporate:
         validate_corporate_payments(c['payments'], c['amount'])
-    for p in ([] if corporate else c['payments']):
+    for p in [p for p in c['payments'] if p.get('mode')!='corporate_transfer']:
         if p['mode'] not in ['bank_transfer', 'corporate_card']:
             raise ValueError('该支付方式未实测接通：' + p['mode'])
         if not p.get('name') or not re.fullmatch(r'[A-Za-z0-9]+', p.get('person_id', '')) or money(p['amount']) <= 0:
             raise ValueError('收款人姓名、工号或金额不完整')
-    duplicates = [k for k, n in Counter((p['mode'], p['person_id']) for p in ([] if corporate else c['payments'])).items() if n > 1]
+    duplicates = [k for k, n in Counter((p['mode'], p['person_id']) for p in c['payments'] if p.get('mode')!='corporate_transfer').items() if n > 1]
     if duplicates:
         raise ValueError('同一收款人同一支付方式应合并：' + str(duplicates))
     codes = [p['code'] for p in c['funding']]
@@ -133,7 +146,7 @@ def validate_categories(plans):
     if not isinstance(plans,list): raise ValueError('费用分类须为列表')
     groups=[]; guids=[]
     for p in plans:
-        if not isinstance(p,dict) or set(p)!={'group','subject','subject_name','amount','invoice_guids','source'}:
+        if not isinstance(p,dict) or set(p)-{'group_key'}!={'group','subject','subject_name','amount','invoice_guids','source'}:
             raise ValueError('费用分类字段不完整或含未知字段')
         if (not isinstance(p['group'],str) or not p['group'].strip() or len(p['group'])>80 or re.search(r'''[\r\n'"<>!&]''',p['group'])
             or not isinstance(p['subject'],str) or not re.fullmatch(r'[0-9]{5,12}',p['subject'])
@@ -143,7 +156,9 @@ def validate_categories(plans):
         ids=p['invoice_guids']
         if not isinstance(ids,list) or not ids or len(ids)>100 or any(not isinstance(x,str) or not re.fullmatch(r'[A-F0-9]{32}',x) for x in ids):
             raise ValueError('费用分类须冻结完整发票GUID')
-        groups.append(p['group']);guids.extend(ids)
+        if 'group_key' in p and (not isinstance(p['group_key'],str) or not re.fullmatch(re.escape(p['group'])+r'!P!\w{1,40}',p['group_key'])):
+            raise ValueError('分类原生分组键不符')
+        groups.append(p.get('group_key',p['group']));guids.extend(ids)
     if len(groups)!=len(set(groups)) or len(guids)!=len(set(guids)):raise ValueError('费用分类分组或发票GUID重复')
 
 
@@ -152,8 +167,11 @@ def load_context(path):
     c = json.loads(Path(path).read_text(encoding='utf-8'))
     if (not isinstance(c.get('case_id'), str) or not c['case_id'].strip() or
         not isinstance(c.get('serial'), str) or not re.fullmatch(r'[0-9]+', c['serial']) or
-        c.get('system_mode', 'daily') != 'daily' or money(c.get('amount')) <= 0):
+        c.get('system_mode', 'daily') not in {'daily','remuneration'} or money(c.get('amount')) <= 0):
         raise ValueError('读取栏目须有明确案件、单号、日常模式和正金额')
+    if c.get('system_mode')=='remuneration':
+        from finance_remuneration_save import validate_bound_case
+        validate_bound_case(c)
     return c
 
 

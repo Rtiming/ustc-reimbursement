@@ -48,9 +48,9 @@ def deployment_plan(root, manifest, config, *, check_only=False, with_ocr=False)
         'runtime_python': str(runtime_python(root)),
         'dependency_locks': {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in locks},
         'stages': ['integrity', 'runtime_and_profile_checks', 'synthetic_smoke'] if check_only else
-                  ['integrity', 'locked_dependencies_and_client_config', 'private_profile', 'synthetic_smoke', 'accept_source'],
+                  ['integrity', 'locked_dependencies_and_client_config', 'private_profile', 'synthetic_smoke', 'existing_review_bindings', 'accept_source'],
         'ocr': 'explicit_local_install' if with_ocr else 'preserve_existing_provider',
-        'network_may_be_needed': not check_only,
+        'network_may_be_needed': not check_only and not (root / 'offline').is_dir(),
         'planned_local_changes': ['self_check_report'] if check_only else ['isolated_runtime', 'client_fragments', 'profile_if_missing', 'installation_receipt'],
         'plan_side_effects': False,
         'financial_write_executed': False,
@@ -95,8 +95,8 @@ def checks(root, config, folder, *, ocr_smoke=False):
             },
             {
                 'name': 'Excel成品创作',
-                'state': 'not_bundled',
-                'detail': '另配表格创作运行时；基础收件和规范不依赖它',
+                'state': 'bundled_native',
+                'detail': '本地XLSX清单导出随材料依赖安装；专有创作运行时仅供额外视觉预览',
             },
             {
                 'name': '远程总账与手机采集',
@@ -123,6 +123,8 @@ def checks(root, config, folder, *, ocr_smoke=False):
         return {'ok': True, 'version': source['version'], 'verification_mode': source['verification_mode']}
 
     check('源码与发行文件完整性', source_integrity)
+    from check_public_docs import check as check_docs
+    check('中英文文档与配置示例', lambda: check_docs(root))
     from check_public_docs import check as check_docs
     check('中英文文档与配置示例', lambda: check_docs(root))
     ready = check(
@@ -220,6 +222,10 @@ def write_report(folder, result):
         content += '<p>停止原因：' + html.escape(result['error']) + '</p>'
     if result.get('source'):
         content += '<p>源码版本：' + html.escape(result['version']) + '；源码SHA：' + html.escape(result['source']['source_tree_sha256']) + '</p>'
+    if result.get('entrypoints'):
+        content += '<h2>开始使用</h2><ul>' + ''.join(
+            '<li><a href="' + html.escape(Path(path).as_uri(), quote=True) + '">' + html.escape(name) + '</a></li>'
+            for name, path in result['entrypoints'].items()) + '</ul><p>DSH入口需要本机已有DSH及用户自己的模型配置；其他代理使用MCP或CLI。</p>'
     content += (
         '<h2>按需接入</h2><ul>'
         + optional
@@ -236,6 +242,7 @@ def run(
     profile_id=None,
     title=None,
     mode=None,
+    review_workspaces=None,
     with_ocr=False,
     plan_only=False,
 ):
@@ -245,7 +252,7 @@ def run(
     if sys.version_info < (3, 11):
         raise ValueError('请从install.sh/install.cmd进入，自动取得独立Python运行时')
     manifest = verify_members(root)
-    config = installation_config(root, data_dir, profile_id, title, mode)
+    config = installation_config(root, data_dir, profile_id, title, mode, review_workspaces)
     plan = deployment_plan(root, manifest, config, check_only=check_only, with_ocr=with_ocr)
     if plan_only:
         return plan
@@ -290,6 +297,7 @@ def run(
                 ]
                 if with_ocr:
                     command.append('--with-ocr')
+                print('正在准备材料处理与助手环境；详细进度保存在本次安装报告目录。', file=sys.stderr, flush=True)
                 with (folder / 'install.log').open('w', encoding='utf-8') as log:
                     process = subprocess.run(
                         command,
@@ -301,7 +309,7 @@ def run(
                     )
                 if process.returncode:
                     raise ValueError(
-                        '依赖安装未完成，查看同目录install.log；修复网络后重跑原安装入口'
+                        '依赖安装未完成，查看同目录install.log；核对离线包或网络后重跑原安装入口'
                     )
                 report['phase'] = 'profile'
                 ensure_profile(AssistantService(root, [config['material_root']]), config)
@@ -309,6 +317,17 @@ def run(
             report.update(
                 checks(root, config, folder, ocr_smoke=with_ocr and not check_only), phase='checked'
             )
+            if report['ok']:
+                from material_review_service import deployment
+                review = deployment(AssistantService(root, [config['material_root']]),
+                                    config['review_workspaces'], check_only=check_only)
+                report['required'].append({'name': '已有反馈工作台接续', 'ok': True, 'details': review})
+                report['entrypoints'] = {name: str(root/'.local/client-configs'/name) for name in
+                    ('打开报销工作台.command', '打开报销工作台.cmd', '打开反馈台.command', '打开反馈台.cmd', '启动DSH助手.command', '启动DSH助手.cmd', 'mcp.json', 'mcp-compact.json', 'dsh.patch.yml')}
+                from desktop_entry import install as desktop_entry
+                shortcut=desktop_entry(root,check_only=check_only)
+                report['required'].append({'name':'固定桌面入口','ok':shortcut['ok'],'details':shortcut})
+                if shortcut.get('path'):report['entrypoints']['桌面报销工作台']=shortcut['path']
             if source_identity(verify_members(root)) != report['source']:
                 raise ValueError('安装期间源码发生变化；保留原回执，不接受混合版本')
             if check_only and not plan['installed_source_matches_current']:
@@ -347,13 +366,14 @@ def main(argv=None):
     parser.add_argument('--profile-id')
     parser.add_argument('--title')
     parser.add_argument('--mode', choices=CASE_PROFILES)
+    parser.add_argument('--review-workspace', action='append', help='已有工作台绝对路径，可重复；须在data-dir内')
     parser.add_argument(
         '--with-ocr', action='store_true', default=None, help='显式安装本机OCR并以合成页验收；默认不安装'
     )
     args = parser.parse_args(argv)
     try:
         options = deployment_options(args.config, data_dir=args.data_dir, profile_id=args.profile_id,
-            title=args.title, mode=args.mode, with_ocr=args.with_ocr)
+            title=args.title, mode=args.mode, with_ocr=args.with_ocr, review_workspaces=args.review_workspace)
         result = run(
             check_only=args.check,
             plan_only=args.plan,
@@ -362,7 +382,7 @@ def main(argv=None):
     except (ValueError, OSError, KeyError, RuntimeError) as error:
         result = {'ok': False, 'phase': 'preflight', 'error': str(error)}
     public = result if args.plan else {key: result.get(key) for key in
-        ('ok', 'phase', 'version', 'source', 'installed_source_matches_current', 'report_path', 'error', 'config')}
+        ('ok', 'phase', 'version', 'source', 'installed_source_matches_current', 'report_path', 'error', 'config', 'entrypoints')}
     print(json.dumps(public, ensure_ascii=False, indent=2))
     return 0 if result['ok'] else 2
 

@@ -61,6 +61,8 @@ def load_definition(service, case_id):
     files = [dict(ref)]
     if cfg.get('schema') != 'ustc-registered-workflow-v1' or cfg.get('case_id') != case_id:
         raise APIError('registered_workflow_scope', '运行资料须绑定本案')
+    from finance_execution_mode import validate_mode
+    cfg={**cfg,'execution_mode':validate_mode(read_json(paths['case']).get('material_context',{}).get('execution_mode'),case_id)}
     if not re.fullmatch(r'[A-Za-z0-9]{2,40}', cfg.get('expected_userid') or ''):
         raise APIError('registered_workflow_user', '本案须明确本机财务登录人')
     if cfg.get('batch_index'):

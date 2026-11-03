@@ -28,7 +28,8 @@ def verify_unconfigured_creation(manifest,form,native_receipt,readback):
     if hashlib.sha256(raw).hexdigest()!=native_receipt.get('source_sha256'):raise ValueError('原创建源码SHA改变')
     template=(Path(__file__).parent/'create_daily_draft.js').read_text()
     prefix='(()=>{if(location.origin!=="https://cwzh.ustc.edu.cn"||$.getProjID()!=="WF_YBX")throw Error("财务系统不符");return (('+template+')('
-    source=raw.decode()
+    # SHA仍核对原字节；Windows写入的CRLF只在源码语义比较时统一。
+    source=raw.decode('utf-8').replace('\r\n','\n')
     if not source.startswith(prefix)or not source.endswith('));})()'):raise ValueError('原创建不是固定已核脚本')
     frozen=json.loads(source[len(prefix):-7])
     if frozen.get('selected_invoices') or frozen.get('serial')or frozen.get('draft_creation_requested')or any(frozen.get(k)!=manifest.get(k)for k in ['case_id','expected_count','original_files']):raise ValueError('原创建曾有选择或原始材料已变')
@@ -46,11 +47,41 @@ def verify_unconfigured_creation(manifest,form,native_receipt,readback):
     return selected
 
 
-def classify_draft_readback(result, invoices):
+def classify_draft_readback(result, invoices, envelope=None):
     if result.get('ok') is not True or result.get('projid')!='WF_YBX':
         raise ValueError('建单回读不是成功的财务原生观察')
     serial=str(result.get('serial') or '').strip()
     dialogs=result.get('visibleDialogs',[])
+    if invoices.get('expired_session_creation_recovery') and not serial and not dialogs and envelope:
+        from finance_draft_session_recovery import registered_proof
+        return registered_proof(invoices, envelope)[1]
+    cancellation=invoices.get('creation_cancel_request')
+    if cancellation and not serial and not dialogs and envelope:
+        from finance_draft_cancel import CANCEL_SCRIPT,FIELDS
+        plan_path=Path(cancellation['plan_path']);native_path=Path(cancellation['native_path'])
+        if hashlib.sha256(plan_path.read_bytes()).hexdigest()!=cancellation['plan_sha256'] or hashlib.sha256(native_path.read_bytes()).hexdigest()!=cancellation['native_sha256']:raise ValueError('取消计划或原生回执SHA变化')
+        plan=json.loads(plan_path.read_text());native=json.loads(native_path.read_text());body=native.get('result',{})
+        completed=native.get('phase')=='script_completed';observed_time=native.get('executed_at_utc')
+        if cancellation.get('recovery_path'):
+            recovery_path=Path(cancellation['recovery_path'])
+            if hashlib.sha256(recovery_path.read_bytes()).hexdigest()!=cancellation.get('recovery_sha256'):raise ValueError('取消恢复回执SHA变化')
+            recovered=json.loads(recovery_path.read_text())
+            if recovered.get('reinjected') is not False or recovered.get('marker_state')!='completed' or Path(recovered.get('receipt','')).resolve()!=native_path.resolve() or recovered.get('tab_id')!=plan['tab_id']:raise ValueError('取消恢复未绑定原标记')
+            body=recovered.get('result',{});completed=True;observed_time=recovered['observed_at_utc']
+        if any(invoices.get(k)!=plan['manifest_before'].get(k) for k in FIELDS):raise ValueError('取消后原创建范围发生变化')
+        if plan['context'].get('case_id')!=invoices['case_id'] or plan['context'].get('invoices')!=invoices['selected_invoices'] or plan['context'].get('guids')!=sorted(x['guid'] for x in invoices['selected_invoices']) or body.get('count')!=invoices['expected_count']:raise ValueError('取消上下文未冻结原完整选择')
+        creation=Path(plan['creation']['path'])
+        if str(creation)!=invoices['creation_receipt'] or hashlib.sha256(creation.read_bytes()).hexdigest()!=plan['creation']['sha256'] or body.get('creation_sha256')!=plan['creation']['sha256']:raise ValueError('取消未绑定原创建回执')
+        expected='('+CANCEL_SCRIPT+')('+json.dumps(plan['context'],ensure_ascii=False)+')'
+        script=Path(native['script']).read_bytes()
+        if script.decode('utf-8').replace('\r\n','\n')!=expected or hashlib.sha256(script).hexdigest()!=native.get('source_sha256') or not completed or body.get('ok') is not True or body.get('action')!='cancel_duplicate_trip_creation_prompt' or body.get('case_id')!=invoices['case_id']:raise ValueError('取消并非本案固定原生操作的明确结果')
+        if envelope.get('tab_id')!=plan['tab_id'] or envelope.get('browser_transport')!=native.get('browser_transport') or result.get('identity',{}).get('userid')!=plan['context']['userid'] or datetime.fromisoformat(envelope['executed_at_utc'])<=datetime.fromisoformat(observed_time):raise ValueError('取消后须同标签、同账号且晚于动作的独立回读')
+        grids=[g for g in result.get('grids',[]) if str(g.get('funcno'))=='53'];selected=invoices['selected_invoices']
+        if len(grids)!=1 or grids[0].get('records')!=len(grids[0].get('rows',[])) or grids[0].get('loading'):raise ValueError('取消回读须完整且就绪的票池')
+        for item in selected:
+            rows=[r for r in grids[0]['rows'] if r.get('t.tk_guid')==item['guid']]
+            if len(rows)!=1 or rows[0].get('t.serial_no') or rows[0].get('t.tk_mod_flag')!='NORMAL' or Decimal(rows[0]['t.tk_total_amt'].replace(',',''))!=Decimal(item['amount']):raise ValueError('取消后原票已有绑定或字段变化')
+        return {'schema':'ustc-draft-readback-v1','state':'cancelled_before_creation','claim_created':False,'serial':None,'cancel_receipt':str(native_path),'original_creation_preserved':True,'next':'原范围已取消；按用户新范围另建明确案件，不重放原创建'}
     prompts=[d.get('text','') for d in dialogs if '有错误信息' in d.get('text','') and '请手工标注或再次认证后再前往报销' in d.get('text','')]
     if prompts:
         if serial or len(prompts)!=1:raise ValueError('建单错误与单号上下文矛盾，保持待核')
@@ -88,6 +119,23 @@ def prepare_rejected_draft_resume(manifest, form, case_directory, current_output
         if current_output is None or active.get('case_id')!=manifest['case_id'] or active.get('operation')!='invoice:create-draft' or Path(active.get('output_directory','')).resolve()!=Path(current_output).resolve():
             raise ValueError('原写入尚未独立核对，不能再次建单')
     recovery=manifest.get('unconfigured_creation_recovery')
+    if manifest.get('expired_session_creation_recovery'):
+        from finance_draft_session_recovery import registered_proof, digest
+        proof, verified = registered_proof(manifest)
+        receipt = Path(manifest['creation_receipt'])
+        ack_path = receipt.parent/'operator_readback_ack.json'
+        ack = json.loads(ack_path.read_text())
+        read_path = Path(ack.get('readback_receipt', ''))
+        if (ack.get('case_id') != manifest['case_id'] or ack.get('operation') != 'invoice:create-draft'
+                or ack.get('outcome') != 'not_applied' or ack.get('status') != 'operator_readback_recorded'
+                or Path(ack.get('output_directory', '')).resolve() != receipt.parent.resolve()
+                or digest(read_path) != proof['sources']['pool']['sha256']):
+            raise ValueError('失效会话恢复未完成独立回读登记')
+        result = copy.deepcopy(manifest)
+        result['draft_creation_requested'] = False
+        result['resuming_rejected_creation'] = {'previous_creation_receipt':str(receipt), 'acknowledgement':str(ack_path),
+            'ack_sha256':digest(ack_path), 'rejection':verified}
+        return result
     if recovery:
         receipt=Path(recovery['original_receipt']);read_path=Path(recovery['readback_receipt']);ack_path=receipt.parent/'operator_readback_ack.json'
         if Path(manifest.get('creation_receipt','')).resolve()!=receipt.resolve():raise ValueError('已有新的创建意图，不得再次复用旧配置拒绝证明')

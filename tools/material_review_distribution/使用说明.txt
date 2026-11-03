@@ -1,0 +1,43 @@
+材料核对工作台 · 经办接续包
+
+用途
+  交给指定经办人继续浏览、补件、记录回复和复核。本包包含整个案件的内部记录和原件，
+  不适合直接发给单个社团。面向社团请在工作台导出“材料浏览包”或“问题反馈草稿”。
+  所有操作仅在本机；不连接学校财务、不发送消息。
+
+首次使用（Python3.10以上）
+  1. 完整解压到可写的目录，保留中文目录结构。不要在ZIP预览窗口中启动。
+  2. 在该目录打开终端，按本机系统执行：
+     Mac/Linux：python3 -m venv .venv
+                .venv/bin/python -m pip install -r requirements-materials.lock.txt
+     Windows：python -m venv .venv
+              .venv\Scripts\python.exe -m pip install -r requirements-materials.lock.txt
+     已安装PyMuPDF/Pillow的Python也可直接使用。安装依赖需要联网；之后可离线使用。
+  3. 先运行 python3 校验包.py（Windows使用python）检查初始交付完整性。
+  4. Mac双击“打开工作台.command”；若无执行权限，在终端运行sh 打开工作台.command。
+     Windows双击“打开工作台.cmd”。也可用上述Python运行：
+       review.py open --workspace workspace --port 0
+     --port 0自动选择空闲端口；访问码只用于本机短期会话。
+
+日常操作
+  从事项/问题打开材料，翻页、放大、下载原件；拖入或多选补件，填写记录人及说明后保存。
+  保存成功才写入磁盘，关闭页面前请保存。收到补件仍需逐条人工复核，不自动销项。
+  “整理与导出”可生成当前事项/社团的材料浏览包，或再次生成完整经办接续包。
+  清单目录包含CSV；workspace/内的版本、events/和attachments/是接续正本，须整体备份。
+  不修改旧事件或原件；有错误追加说明/重新核查记录。索引或原件校验失败时从备份核对恢复。
+
+运行、停止与接续
+  review.py doctor --workspace workspace       检查Python、依赖及工作区可写性
+  review.py status --workspace workspace       查看本机进程和记录版本
+  review.py verify --workspace workspace       核对当前索引、原件、补件和事件链
+  review.py stop --workspace workspace         通过已认证的本机接口停止，不删除任何材料
+  review.py export --mode handoff --workspace workspace
+  交接时先保存所有页面输入，导出接续包后停止旧副本；从此只在一个副本继续写入。
+  新经办完成后重新导出接续包交还，不把两边events目录直接合并。当前不支持分叉记录自动合并。
+  .local/和.venv/是当前电脑的运行环境，不要作为案件资料同步；导出器会排除它们。
+
+范围和校验
+  原件字节及其SHA保持不变，当前索引使用包内相对路径；历史快照保留来源记录供追溯。
+  校验包.py只核对初始交付文件；持续使用后以verify检查当前正本。新增事件不会改写旧记录。
+  冻结Excel导入、重新解析构建、正式单面打印仍使用完整工具仓。网页复核不等于财务审批/付款。
+  本轮验收覆盖Mac本机、移动目录后的接续、浏览器交互和失败拒绝；Windows启动脚本未实机验收。

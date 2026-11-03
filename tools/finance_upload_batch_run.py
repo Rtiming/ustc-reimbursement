@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """串行调用已验证原生工具上传查验；任何未知结果停在原回执，绝不重发。"""
 import argparse
+from contextlib import nullcontext
 import hashlib
 import json
 import re
@@ -294,14 +295,21 @@ def main():
     p.add_argument('--readback-only',action='store_true')
     p.add_argument('--resume-preflight',action='store_true',help='仅接续有源码与独立空现场证明的入口未就绪拒绝')
     p.add_argument('--readback-tag',default='recovery')
+    p.add_argument('--keep-internal-tab',action='store_true',help='仅Edge在后台时临时保持本财务标签，整批结束恢复原标签，不激活应用')
     a=p.parse_args()
     try:
         if a.resume_preflight and a.readback_only:raise ValueError('接续模式只能选择一个')
-        if a.readback_only:
-            if not re.fullmatch(r'[a-zA-Z0-9_-]+',a.readback_tag):raise ValueError('回读标签无效')
-            collect_batch(a.manifest,a.tab_id,a.output_dir,a.readback_tag)
-        elif a.resume_preflight:resume_preflight(a.manifest,a.tab_id,a.output_dir)
-        else:run_batch(a.manifest,a.tab_id,a.output_dir)
+        if a.readback_only and not re.fullmatch(r'[a-zA-Z0-9_-]+',a.readback_tag):raise ValueError('回读标签无效')
+        if not a.readback_only and not a.resume_preflight and a.output_dir.exists():raise ValueError('上传输出目录已存在，须沿原回执恢复')
+        from finance_session import quiet_tab_context
+        tag=a.readback_tag if a.readback_only else 'resume' if a.resume_preflight else 'upload'
+        context_path=a.output_dir.with_name(a.output_dir.name+'.'+tag+'-tab-context.json')
+        if a.keep_internal_tab and context_path.exists():raise ValueError('标签保持回执已存在，不覆盖原观察')
+        context=quiet_tab_context(a.tab_id,context_path) if a.keep_internal_tab else nullcontext()
+        with context:
+            if a.readback_only:collect_batch(a.manifest,a.tab_id,a.output_dir,a.readback_tag)
+            elif a.resume_preflight:resume_preflight(a.manifest,a.tab_id,a.output_dir)
+            else:run_batch(a.manifest,a.tab_id,a.output_dir)
     except Exception as error:
         print(json.dumps({'ok':False,'error':str(error),'retry_upload':False},ensure_ascii=False),flush=True);return 1
     return 0

@@ -1,0 +1,21 @@
+const assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs'),path=require('node:path'),source=fs.readFileSync(path.join(__dirname,'../tools/finance_default_funding_api.js'),'utf8');
+const c={budget_allocation_mode:'system_default_single_funding',funding:[{code:'F1',amount:'10.00'}],expense_allocations:[],funding_policy:{},expected_amount:'10.00'};
+async function run(mode){
+ const config=JSON.parse(JSON.stringify(c));if(mode==='manual')config.budget_allocation_mode='manual';if(mode==='multiple')config.funding.push({code:'F2',amount:'0'});if(mode==='explicit')config.expense_allocations=[{}];if(mode==='policy')config.funding_policy.invoice_level_required=true;
+ const categories=[{group:'合成组',group_key:'合成组!P!1',subject:'30201',project:mode==='foreign'?'OTHER':'F1',budget:mode==='no_budget'?'':'B1',amount:mode==='total'?'9.00':'10.00'}],entries=[{group:'合成组',subject:'30201',parameters:'合成组&30201&合成组!P!1',amount:mode==='group_amount'?'9.00':'10.00'}];
+ const ctx=vm.createContext({ReimbursementHttpValues:{moneyCents:v=>BigInt(v.replace('.',''))},reimbursementAmountInspect:async()=>({bill:{},basic_sections:[],categories,entries,requests:[]})});vm.runInContext(source,ctx);return vm.runInContext('reimbursementDefaultFunding('+JSON.stringify(config)+')',ctx);
+}
+async function allowance(mode){
+ const config={...c,expected_amount:'3240.00',funding:[{code:'F1',amount:'3240.00'}],allowance_native_source:{binding:{case_id:'fixture'}}};
+ const categories=[{group:'国内出差伙食补贴',project:'F1',budget:'B1',amount:'1800.00'},{group:'国内出差交通补贴',project:'F1',budget:'B1',amount:'1440.00'}];
+ const ctx=vm.createContext({ReimbursementHttpValues:{moneyCents:v=>BigInt(v.replace('.',''))},reimbursementAmountInspect:async()=>({bill:{'t.bx_type':mode==='wrong_type'?'1':'2'},basic_sections:[],categories,entries:mode==='mixed'?[{}]:[],requests:[]}),reimbursementAllowanceReadback:async()=>({complete:true,rows:[{HSBT:mode==='wrong_component'?'1700.00':'1800.00',JTBT:'1440.00'}],requests:[]})});vm.runInContext(source,ctx);return vm.runInContext('reimbursementDefaultFunding('+JSON.stringify(config)+')',ctx);
+}
+async function domestic(mode){
+ const components={'国内出差伙食补贴':'200.00','国内出差交通补贴':'160.00'},config={...c,expected_amount:'460.00',funding:[{code:'F1',amount:'460.00'}],domestic_allowance_source:{binding:{case_id:'fixture'},invoice_amount:'100.00',components}};
+ const categories=[{group:'交通票',group_key:'ticket-key',subject:'302',project:'F1',budget:'B1',amount:'100.00'},...Object.entries(components).map(([group,amount])=>({group,amount,project:'F1',budget:'B1'}))];
+ const entries=[{group:'交通票',subject:'302',parameters:'a&b&ticket-key',amount:mode==='ticket_drift'?'99.00':'100.00'}];
+ if(mode==='missing_component')categories.splice(2,1);if(mode==='wrong_type')config.domestic_allowance_source.invoice_amount='101.00';
+ const actualComponents={...components};if(mode==='compensating_components'){actualComponents['国内出差伙食补贴']='199.00';actualComponents['国内出差交通补贴']='161.00';}
+ const ctx=vm.createContext({ReimbursementHttpValues:{moneyCents:v=>BigInt(v.replace('.',''))},reimbursementAmountInspect:async()=>({bill:{'t.bx_type':'2'},basic_sections:[],categories,entries,requests:[]}),reimbursementDomesticAllowanceFinalReadback:async()=>({complete:true,components:actualComponents,allowances:[{}],requests:[]})});vm.runInContext(source,ctx);return vm.runInContext('reimbursementDefaultFunding('+JSON.stringify(config)+')',ctx);
+}
+(async()=>{assert.equal((await run()).proof.kind,'system_default_single_funding');for(const mode of ['manual','multiple','explicit','policy','foreign','no_budget','total','group_amount'])await assert.rejects(run(mode),undefined,mode);assert.equal((await allowance()).proof.kind,'system_default_allowance_funding');for(const mode of ['mixed','wrong_type','wrong_component'])await assert.rejects(allowance(mode),undefined,mode);assert.equal((await domestic()).proof.kind,'system_default_domestic_funding');for(const mode of ['ticket_drift','missing_component','wrong_type','compensating_components'])await assert.rejects(domestic(mode),undefined,mode);console.log('default funding: invoices, standalone allowance and same-claim domestic components verified; drift and compensating wrong components rejected');})().catch(e=>{console.error(e);process.exitCode=1});

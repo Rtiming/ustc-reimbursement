@@ -175,7 +175,7 @@
   }
   function templateInspect(){
     if(location.origin!=='https://cwzh.ustc.edu.cn'||$.getProjID()!=='WF_YBX'||!p.expected_userid||$.UC.bindData('#0-userinfo.userid#')!==p.expected_userid)throw Error('模板观察账号变化');
-    const functions=['before_applycheck','ybxmain_filesize','jbxxNext_v1','checkCommit_V1','print_bxd_prompt_after_101','handlePrintAction','before_dsp_approval','after_dsp_approval','before_apply_list_dtl','after_apply_list_dtl','printGrid'].map(name=>{const d=Object.getOwnPropertyDescriptor(root,name),source=d&&'value'in d&&typeof d.value==='function'?String(d.value):null;return{name,source:source?.slice(0,24000),capture_complete:source!==null&&source.length<=24000};});
+    const functions=['before_applycheck','ybxmain_filesize','jbxxNext_v1','checkCommit_V1','print_bxd_prompt_after_101','handlePrintAction','bxddy_after','init_sp_params','clickButton','before_dsp_approval','after_dsp_approval','before_apply_list_dtl','after_apply_list_dtl','printGrid'].map(name=>{const d=Object.getOwnPropertyDescriptor(root,name),source=d&&'value'in d&&typeof d.value==='function'?String(d.value):null;return{name,source:source?.slice(0,24000),capture_complete:source!==null&&source.length<=24000};});
     const gridExport=Object.getOwnPropertyDescriptor($.grid||{},'printGrid')?.value;
     functions.push({name:'$.grid.printGrid',source:typeof gridExport==='function'?String(gridExport).slice(0,24000):null,capture_complete:typeof gridExport==='function'&&String(gridExport).length<=24000});
     return{ok:true,action:'inspect_fixed_native_template_functions',identity:{userid:p.expected_userid},functions,serial:$.UC.bindData('#61-serialno#'),node:$.UC.bindData('#61-node_id#'),pendingNativeRequests:$.active,system_write:false,functions_called:false};

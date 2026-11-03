@@ -5,7 +5,7 @@
  const visible=e=>!!e&&e.getClientRects().length>0;
  const one=(es,message)=>{if(es.length!==1)throw new Error(message);return es[0];};
  const cents=s=>{s=String(s).replaceAll(',','').trim();if(!/^\d+(?:\.\d{1,2})?$/.test(s))throw new Error('金额格式错误');const[a,b='']=s.split('.');return Number(a)*100+Number(b.padEnd(2,'0'));};
- function guard(c,write=true){if(c.system_mode&&c.system_mode!=='daily')throw new Error('系统模式尚未实测接通：'+c.system_mode);if(location.origin!=='https://cwzh.ustc.edu.cn'||$.getProjID()!=='WF_YBX'||!/^\d+$/.test(c.serial)||$.UC.bindData('#61-serialno#')!==c.serial)throw new Error('业务系统或单据身份不符');let user=c.expected_userid;if(c.payments?.some(p=>p.mode==='corporate_transfer')){const users=new Set(c.payments.map(p=>p.expected_userid));if(users.size!==1||!c.payments.every(p=>p.mode==='corporate_transfer')||typeof c.payments[0].expected_userid!=='string'||!/^[A-Za-z0-9]+$/.test(c.payments[0].expected_userid))throw new Error('对公支付须有本案一致的明确登录人且不得混合支付');const corporateUser=c.payments[0].expected_userid;if(user&&user!==corporateUser)throw new Error('对公支付登录人配置冲突');user=corporateUser;}if(user&&$.UC.bindData('#0-userinfo.userid#')!==user)throw new Error('当前登录人不符');if(write&&visible(document.querySelector('.foot_winWF_YBX_76 button[btnname="同意"]')))throw new Error('当前为申请人审核页，不能继续按草稿填写');}
+ function guard(c,write=true){if(c.system_mode&&!['daily','remuneration'].includes(c.system_mode))throw new Error('系统模式尚未实测接通：'+c.system_mode);if(c.system_mode==='remuneration'){const text=document.getElementById('iframepage_print')?.contentDocument?.body?.innerText||'';if(text.trim()&&!text.includes('中国科学技术大学薪酬业务单'))throw Error('须同单号薪酬业务单');}if(location.origin!=='https://cwzh.ustc.edu.cn'||$.getProjID()!=='WF_YBX'||!/^\d+$/.test(c.serial)||$.UC.bindData('#61-serialno#')!==c.serial)throw new Error('业务系统或单据身份不符');let user=c.expected_userid;if(c.payments?.some(p=>p.mode==='corporate_transfer')){const users=new Set(c.payments.map(p=>p.expected_userid));if(users.size!==1||!c.payments.every(p=>p.mode==='corporate_transfer')||typeof c.payments[0].expected_userid!=='string'||!/^[A-Za-z0-9]+$/.test(c.payments[0].expected_userid))throw new Error('对公支付须有本案一致的明确登录人且不得混合支付');const corporateUser=c.payments[0].expected_userid;if(user&&user!==corporateUser)throw new Error('对公支付登录人配置冲突');user=corporateUser;}if(user&&$.UC.bindData('#0-userinfo.userid#')!==user)throw new Error('当前登录人不符');if(write&&visible(document.querySelector('.foot_winWF_YBX_76 button[btnname="同意"]')))throw new Error('当前为申请人审核页，不能继续按草稿填写');}
  async function wait(test,message){for(let i=0;i<80;i++){if(test())return;await delay(100);}throw new Error(message);}
  function click(scope,caption){one([...scope.querySelectorAll('button')].filter(e=>visible(e)&&(e.getAttribute('btnname')===caption||e.innerText.trim()===caption)),'原生按钮不唯一：'+caption).click();}
  function dialog(fieldId){return one([...document.querySelectorAll('.ui-dialog')].filter(e=>visible(e)&&e.querySelector('#'+fieldId)),'原生窗口不唯一：'+fieldId);}
@@ -62,7 +62,7 @@
  async function closePayments(c){
   const guid='3BB7925A6F164D0AA0451CE177A7E1CF',forms=['19','22','24','245','285','456','597','994','1508','1510','1791','2082','2212','2225'];
   const snapshot=()=>{
-   guard(c,false);if(!/^[A-Za-z0-9]{2,40}$/.test(c.expected_userid||'')||$.UC.bindData('#0-userinfo.userid#')!==c.expected_userid||!['6','70'].includes(String($.page.currPage)))throw Error('支付返回须本案同账号同号原生支付上下文6/70');
+   guard(c,false);if(!/^[A-Za-z0-9]{2,40}$/.test(c.expected_userid||'')||$.UC.bindData('#0-userinfo.userid#')!==c.expected_userid||!(c.system_mode==='remuneration'?['198']:['6','70']).includes(String($.page.currPage)))throw Error('支付返回须本案同账号同号原生支付上下文6/70');
    if([...document.querySelectorAll('.ui-dialog')].some(visible))throw Error('存在其他对话框，不能丢弃原现场');
    const tracker=root.__reimbursementUploadTracking;
    if(tracker&&(tracker.done!==true||typeof tracker.dispatchRequested!=='boolean'||typeof tracker.saveRequested!=='boolean'))throw Error('原上传状态未明确结束，不能返回');
@@ -90,7 +90,7 @@
    }
    if(all.length!==expected.size||all.some(e=>!expected.has(e.id)))throw Error('存在未核定支付字段，不能返回');
    const field=id=>one(all.filter(e=>e.id===id),'支付总额字段不唯一');
-   if(!visible(field('formWF_YBX_19_t-bx_amt'))||cents(field('formWF_YBX_19_t-bx_amt').value)!==cents(c.amount)||cents(field('formWF_YBX_19_t-wt_amt').value)!==cents(c.amount)||field('formWF_YBX_19_t-yt_amt').value!=='0.00'||field('formWF_YBX_19_t-clr_amt').value!=='0.00')throw Error('待报销、未填或已填支付总额状态不符');
+   if(!visible(field('formWF_YBX_19_t-bx_amt'))||cents(field('formWF_YBX_19_t-bx_amt').value)!==cents(c.system_mode==='remuneration'?'0.00':c.amount)||cents(field('formWF_YBX_19_t-wt_amt').value)!==cents(c.system_mode==='remuneration'?'0.00':c.amount)||field('formWF_YBX_19_t-yt_amt').value!=='0.00'||field('formWF_YBX_19_t-clr_amt').value!=='0.00')throw Error('待报销、未填或已填支付总额状态不符');
    const footer=one([...document.querySelectorAll('.foot_winWF_YBX_13')].filter(visible),'支付编辑器不唯一');
    const buttons=[...document.querySelectorAll('button')].filter(e=>visible(e)&&e.getAttribute('btnname')==='返回');
    const button=one(buttons,'支付原生返回不唯一');
@@ -170,10 +170,12 @@
   return{ok:true,action:'close_basic_without_save',serial:c.serial,system_write:false};
  }
  async function openInvoiceGroup(c,group){
+  const groupKey=typeof group==='object'&&group!==null?group.group_key:null;group=typeof group==='object'&&group!==null?group.group:group;
   guard(c);if(typeof group!=='string'||!group.trim()||group.length>80||/[\r\n'"<>!&]/.test(group))throw new Error('须明确原生发票内容分组');
+  if(groupKey!==null&&(typeof groupKey!=='string'||!groupKey.startsWith(group+'!P!')||!/^\w{1,40}$/.test(groupKey.slice(group.length+3))))throw new Error('原生分组键不符');
   if(visible(document.getElementById('gridWF_YBX_305')))throw new Error('已有发票信息窗口，先核对原窗口');
   const f=document.getElementById('iframepage_print');if(!f?.contentDocument.body.innerText.includes('报销单号：'+c.serial))throw new Error('本案编辑预览未就绪');
-  const e=one([...f.contentDocument.querySelectorAll('[onclick]')].filter(x=>x.getAttribute('onclick').startsWith("pageOpen_v1('发票信息','"+group+'!P!')),'本类发票信息入口不唯一');
+  const e=one([...f.contentDocument.querySelectorAll('[onclick]')].filter(x=>x.getAttribute('onclick').startsWith("pageOpen_v1('发票信息','"+(groupKey?groupKey+'&':group+'!P!'))),'本类发票信息入口不唯一');
   e.click();await wait(()=>visible(document.getElementById('gridWF_YBX_305')),'发票信息未打开');
   return{ok:true,action:'open_invoice_group',serial:c.serial,group,system_write:false};
  }
@@ -187,9 +189,9 @@
  async function fillInvoiceCategory(c,index){
   guard(c);const p=c.expense_categories?.[index];if(!p||!p.source||!p.invoice_guids?.length)throw new Error('须有冻结的费用分类及依据');
   if(c.funding.length!==1||c.funding_policy?.invoice_level_required)throw new Error('整组分类仅用于单经费且无逐票限制');
-  await openInvoiceGroup(c,p.group);const g=$('#gridWF_YBX_305');await wait(()=>!g[0].grid.hDiv.loading,'分类候选尚未加载');
+  await openInvoiceGroup(c,p.group_key?{group:p.group,group_key:p.group_key}:p.group);const g=$('#gridWF_YBX_305');await wait(()=>!g[0].grid.hDiv.loading,'分类候选尚未加载');
   const rows=()=>g.jqGrid('getDataIDs').map(id=>({id,r:g.jqGrid('getRowData',id)})),sameIds=s=>String(s).split(',').sort().join(',')===[...p.invoice_guids].sort().join(',');
-  const all=rows();if(!all.length||all.some(x=>!x.r['t.xtype'].startsWith(p.group+'!P!')||x.r['t.xtype'].split('&')[2]!==c.funding[0].code||cents(x.r['t.amt'])!==cents(p.amount)||!sameIds(x.r['t.tk_guids'])))throw new Error('分类分组、经费、金额或逐票范围变化');
+  const all=rows();if(!all.length||all.some(x=>!x.r['t.xtype'].startsWith(p.group+'!P!')||(p.group_key&&x.r['t.xtype'].split('&')[0]!==p.group_key)||x.r['t.xtype'].split('&')[2]!==c.funding[0].code||cents(x.r['t.amt'])!==cents(p.amount)||!sameIds(x.r['t.tk_guids'])))throw new Error('分类分组、经费、金额或逐票范围变化');
   const target=one(all.filter(x=>x.r['t.jj_subj']===p.subject&&x.r['t.jj_subjname']===p.subject_name),'目标科目不唯一或不是原生候选');
   if(all.filter(x=>x.r['t.select_flag']==='已选').length!==1)throw new Error('当前分类并非唯一整组科目');
   if(target.r['t.select_flag']==='已选'){await closeInvoiceGroup(c);return{ok:true,action:'verify_invoice_category',serial:c.serial,group:p.group,subject:p.subject,system_write:false,requiresReadback:true};}
@@ -203,9 +205,10 @@
    if(!doc?.body?.innerText?.includes('报销单号：'+c.serial))return false;
    const prefix="pageOpen_v1('发票信息','"+p.group+'!P!';
    const found=[...doc.querySelectorAll('[onclick]')].filter(e=>e.getAttribute('onclick').startsWith(prefix));
-   if(found.length!==1)return false;
-   const parts=found[0].getAttribute('onclick').slice(prefix.length).split('&'),cells=found[0].closest('tr')?.cells;
-   return parts[1]?.trim()===p.subject&&parts[2]===c.funding[0].code&&found[0].innerText.trim()===p.subject_name&&cells?.length===5&&cents(cells[4].innerText)===cents(p.amount);
+   const exact=p.group_key?found.filter(e=>e.getAttribute('onclick').startsWith("pageOpen_v1('发票信息','"+p.group_key+'&')):found;
+   if(exact.length!==1)return false;
+   const parts=exact[0].getAttribute('onclick').slice(prefix.length).split('&'),cells=exact[0].closest('tr')?.cells;
+   return parts[1]?.trim()===p.subject&&parts[2]===c.funding[0].code&&exact[0].innerText.trim()===p.subject_name&&cells?.length===5&&cents(cells[4].innerText)===cents(p.amount);
   },'分类已请求确认但原生科目或金额尚未匹配；停止后续分组并独立回读，不重发');
   return{ok:true,action:'save_invoice_category',serial:c.serial,group:p.group,subject:p.subject,subjectName:p.subject_name,amount:p.amount,invoiceCount:p.invoice_guids.length,requiresReadback:true};
  }
@@ -304,6 +307,33 @@
   const errors=paymentPrompts().filter(x=>x.title==='提示信息'&&/错误|失败|未选择|未选|至少|不能为空|不正确|不合法|不能大于|请填写|请选择|不一致|余额不足|不允许|禁止/.test(x.message)).map(x=>x.message);
   for(const item of $.F.validators?.['243']?.errorList||[])if(item.message)errors.push(String(item.message));
   return[...new Set(errors)];
+ }
+ function inspectRemunerationPayment(c){
+  guard(c,false);const f=document.getElementById('iframepage_print'),d=f?.contentDocument;if(c.system_mode!=='remuneration'||!d?.body?.innerText.includes('报销单号：'+c.serial))throw Error('须同号薪酬预览');
+  return{ok:true,action:'inspect_remuneration_payment_choice',serial:c.serial,system_write:false,choices:[...d.querySelectorAll('input[name="form_cj_paytype"]')].map(e=>({value:e.value,checked:e.checked,html:e.outerHTML,parentHTML:e.parentElement.outerHTML.slice(0,6000)}))};
+ }
+ function addOtherFunding(c){
+  guard(c);const p=c.funding?.[0];if(c.system_mode!=='remuneration'||c.funding?.length!==1||!p.owner_name||document.getElementById('formWF_YBX_243_t-proj_code')?.value!==p.code||!String(document.getElementById('formWF_YBX_243_t-charge_sname')?.value||'').split(/[,，]/).map(x=>x.trim()).includes(p.owner_name))throw Error('须先核实原生回填项目及负责人');
+  const area=document.getElementById('241_other_proj');const buttons=[...area?.querySelectorAll('[onclick]')||[]].filter(e=>visible(e)&&e.getAttribute('onclick')==="clickButton('171','YC_保存他人项目')");if(buttons.length!==1)throw Error('原生添加项目入口不唯一');
+  buttons[0].click();return{ok:true,action:'add_native_other_project_candidate_requested',serial:c.serial,code:p.code,owner:p.owner_name,funding_saved:false,requiresIndependentReadback:true};
+ }
+ async function selectOtherFunding(c){
+  guard(c,false);const p=c.funding?.[0],g=$('#gridWF_YBX_380');if(c.funding?.length!==1||!p.owner_name||!visible(g[0]))throw Error('须明确本项经费及原生负责人');
+  const rows=g.jqGrid('getDataIDs').map(id=>({id,r:g.jqGrid('getRowData',id)}));const x=one(rows.filter(x=>x.r['t.uni_proj_code']===p.code&&x.r['t.charge_sname']===p.owner_name),'原生项目负责人候选不唯一');
+  g.jqGrid('setSelection',x.id,true);if(g.jqGrid('getGridParam','selrow')!==x.id)throw Error('原生候选未选定');
+  click(dialog('gridWF_YBX_380'),'确定');await wait(()=>document.getElementById('formWF_YBX_243_t-proj_code')?.value===p.code&&String(document.getElementById('formWF_YBX_243_t-charge_sname')?.value||'').split(/[,，]/).map(x=>x.trim()).includes(p.owner_name)&&Number($.active||0)===0,'原生经费选择未回填');
+  return{ok:true,action:'select_native_other_project_candidate',serial:c.serial,code:p.code,owner:p.owner_name,saveRequested:false,requiresIndependentReadback:true};
+ }
+ function openOtherFunding(c){
+  guard(c,false);const e=document.getElementById('formWF_YBX_243_t-proj_code_btn'),field=$.F.list['243']?.formFields?.find(f=>f.id==='t-proj_code');
+  if(!visible(e)||e.disabled||field?.inputtype!=='func'||field?.binding_func!=='W@272@@#272-t.uni_proj_code#')throw Error('原生其他项目查询入口变化');
+  e.click();return{ok:true,action:'open_native_other_project_lookup',serial:c.serial,system_write:false,requiresIndependentReadback:true};
+ }
+ async function queryFunding(c,term){
+  guard(c,false);if(typeof term!=='string'||!term.trim()||term.length>40)throw Error('经费查询词不合法');
+  const e=document.getElementById('gridWF_YBX_242_qspi'),button=document.getElementById('gridWF_YBX_242_query');
+  if(!visible(e)||!visible(button)||button.disabled||button.getAttribute('onclick')!=='if ($.grid.doQuickSearchQuery(242)) $.page.triggerBy( 242 );')throw Error('原生经费查询入口变化');
+  e.value=term;button.click();return{ok:true,action:'query_native_funding',serial:c.serial,query:term,system_write:false,requiresIndependentReadback:true};
  }
  async function fillFunding(c,save){
   guard(c);const grid=$('#gridWF_YBX_242');if(!visible(grid[0]))throw new Error('经费选择窗口未打开');
@@ -623,5 +653,5 @@
   return{ok:true,action:'dismiss_payment_validation_and_return',serial:c.serial,system_write:false,saveRequested:false,validationKind:isBank?'zero_remittance_account_format':'transfer_remark_length',validationDismissed:true,returnedToPreview:true,requiresReadback:true};
  }
  async function dismissPaymentRemarkError(c){return{...await dismissPaymentValidationError(c),action:'dismiss_payment_remark_validation_and_return'};}
- root.ReimbursementAutomation={version:'0.3.1',guard,wait,click,dialog,set,cents,inspectHome,closePayments,inspectDraft,recoverPreview,diagnosePreview,recoverMain,navigate,inspectBasic,closeBasic,closeEmptyExplanation,openInvoiceGroup,inspectInvoiceGroup,closeInvoiceGroup,fillInvoiceCategory,teacherCandidate,lookupTeacher,fillBasic,fillExpenses,fillTransfers,inspectCorporates,fillCorporateTransfers,saveCorporatePayments,transferRemarkUnits,validateTransferRemark,fillExplanation,noContract,queryMoney,fillFunding,preReview,cardQuery,cardSelect,audit,prepareReview,acceptPromise,departmentApprovers,status,waitSection,savePayments,dismissPaymentValidationError,dismissPaymentRemarkError};
+ root.ReimbursementAutomation={inspectRemunerationPayment,addOtherFunding,selectOtherFunding,openOtherFunding,queryFunding,version:'0.3.1',guard,wait,click,dialog,set,cents,inspectHome,closePayments,inspectDraft,recoverPreview,diagnosePreview,recoverMain,navigate,inspectBasic,closeBasic,closeEmptyExplanation,openInvoiceGroup,inspectInvoiceGroup,closeInvoiceGroup,fillInvoiceCategory,teacherCandidate,lookupTeacher,fillBasic,fillExpenses,fillTransfers,inspectCorporates,fillCorporateTransfers,saveCorporatePayments,transferRemarkUnits,validateTransferRemark,fillExplanation,noContract,queryMoney,fillFunding,preReview,cardQuery,cardSelect,audit,prepareReview,acceptPromise,departmentApprovers,status,waitSection,savePayments,dismissPaymentValidationError,dismissPaymentRemarkError};
 })(globalThis);

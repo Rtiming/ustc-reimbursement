@@ -1,5 +1,9 @@
 /* 回读当前页面的单据/表格/字段，输出只含必要业务事实。 */
 (async () => {
+  // 保存/提交的原生请求尚在处理中时先有界等待，避免立即采到旧页面再整页重读。
+  const readinessStart=Date.now();
+  while(Number($.active||0)>0&&Date.now()-readinessStart<5000)await new Promise(resolve=>setTimeout(resolve,100));
+  const readinessWaitMs=Date.now()-readinessStart,readinessWaitTimedOut=Number($.active||0)>0;
   // 与submission.js的proof_row字段合同一致，保留原生行而不猜业务归属。
   const proofRow=e=>{
     if(!e.name?.startsWith('form_proof_choose'))return undefined;
@@ -70,7 +74,7 @@
         proof_inventory:f.id==='iframepage_print'?proofInventory(f,String($.UC.bindData('#61-serialno#')||'')):undefined,
         tables:[...d.querySelectorAll("table")].map(t=>[...t.rows].map(r=>[...r.cells].map(c=>c.innerText.trim()))),
         fields:[...d.querySelectorAll("input,select,textarea")].filter(e=>e.type!=="password").map(e=>({id:e.id,name:e.name,type:e.type,checked:e.checked,disabled:e.disabled,value:/yzm|captcha|sms|otp/i.test(e.id+' '+e.name)||e.id==='formWF_YBX_1362_t-code'?'[protected]':/account|bankacnt|cnt1|cardno|acnt/i.test(e.id)?maskAccount(e.value):e.value,proof_row:proofRow(e)})),
-        controls:[...d.querySelectorAll("[onclick]")].map(e=>({tag:e.tagName,text:e.textContent.trim(),onclick:e.getAttribute("onclick")}))};
+        controls:[...d.querySelectorAll("[onclick]")].map(e=>({tag:e.tagName,text:e.textContent.trim(),onclick:e.getAttribute("onclick"),...(e.getAttribute('onclick').startsWith("pageOpen_v1('发票信息',")?{row_cells:[...(e.closest('tr')?.cells||[])].map(c=>c.innerText.trim())}:{})}))};
     }catch(e){return {index:i,inaccessible:true,error:String(e.name)};}
   });
   // Hash exact numeric table cells from the captured preview. This is a
@@ -96,7 +100,7 @@
     fields:[...document.querySelectorAll('#formWF_YBX_45 input,#formWF_YBX_45 select,#formWF_YBX_45 textarea')].filter(e=>e.type!=='password').map(e=>({id:e.id,value:e.value,visible:!!e.getClientRects().length,disabled:!!e.disabled})),
     nextBeforeSource:typeof window.ybx_jbxx_next_before==='function'?String(window.ybx_jbxx_next_before).slice(0,16000):null};
   const visibleDialogs=[...document.querySelectorAll('.ui-dialog')].filter(e=>e.getClientRects().length).map(e=>({text:e.innerText.slice(0,6000),buttons:[...e.querySelectorAll('button')].filter(b=>b.getClientRects().length).map(b=>({text:b.innerText,btnname:b.getAttribute('btnname'),disabled:!!b.disabled}))}));
-  return {ok: true, currentPage: String($.page.currPage), projid: $.getProjID(), nativeRequests:$.active, identity:{userid:$.UC.bindData('#0-userinfo.userid#'),username:$.UC.bindData('#0-userinfo.username#')}, uploadNativeState, serial:$.UC.bindData('#61-serialno#'), node:$.UC.bindData('#61-node_id#'), uploadTracking, grids, forms,
+  return {ok: true, currentPage: String($.page.currPage), projid: $.getProjID(), nativeRequests:$.active, readinessWaitMs, readinessWaitTimedOut, identity:{userid:$.UC.bindData('#0-userinfo.userid#'),username:$.UC.bindData('#0-userinfo.username#')}, uploadNativeState, serial:$.UC.bindData('#61-serialno#'), node:$.UC.bindData('#61-node_id#'), uploadTracking, grids, forms,
     frames,draftContext,visibleDialogs,
     visibleText: document.body.innerText.slice(0, 16000),
     visibleInputs: [...document.querySelectorAll("input,select,textarea")].filter(e => e.getClientRects().length && !["password","hidden"].includes(e.type))

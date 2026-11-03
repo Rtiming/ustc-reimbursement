@@ -45,6 +45,13 @@ class DeploymentTests(unittest.TestCase):
             atomic_json(path, {'schema': 'ustc-deployment-v1', **change})
             with self.assertRaises(ValueError): deployment_options(path)
         with self.assertRaises(ValueError): installation_config(self.root, title='')
+        data = self.root/'材料';ws=data/'反馈工作台'
+        config = installation_config(self.root, data_dir=data, review_workspaces=[str(ws)])
+        self.assertEqual(config['review_workspaces'],[str(ws.resolve())])
+        atomic_json(self.root/'.local/installation.json',config)
+        self.assertEqual(installation_config(self.root)['review_workspaces'],config['review_workspaces'])
+        for paths in ['bad',['relative'],[str(ws),str(ws)],['/outside']]:
+            with self.assertRaises(ValueError): installation_config(self.root, review_workspaces=paths)
 
     @unittest.skipIf(sys.version_info < (3, 11), '发行安装入口要求Python3.11+')
     def test_plan_creates_no_state_or_material_directory_and_starts_nothing(self):
@@ -58,6 +65,8 @@ class DeploymentTests(unittest.TestCase):
 
     @unittest.skipIf(sys.version_info < (3, 11), '发行安装入口要求Python3.11+')
     def test_only_success_accepts_source_and_failed_upgrade_preserves_previous(self):
+        shortcut=patch('desktop_entry.install',return_value={'ok':True,'state':'synthetic_shortcut_verified'})
+        shortcut.start();self.addCleanup(shortcut.stop)
         def profile(service, config): Path(config['library_root']).mkdir(exist_ok=True)
         passed = {'ok': True, 'required': [{'name': 'synthetic', 'ok': True}]}
         with patch.object(installer, 'verify_members', return_value=self.manifest), patch.object(installer, 'ensure_profile', side_effect=profile), patch.object(installer.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0)), patch.object(installer, 'checks', return_value=passed):

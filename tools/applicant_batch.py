@@ -163,6 +163,9 @@ def record_existing_submission(service, case, userid, reference):
         and parameters.get('mode', 'readback') == 'readback'
     ) or (
         request.get('operation') == 'submission' and parameters.get('action') == 'status-readback'
+    ) or (
+        request.get('operation') == 'business' and parameters.get('action') == 'bills-list'
+        and parameters.get('expected_userid') == userid and request.get('execute') is False
     )
     if not independent or envelope.get('phase') != 'script_completed':
         raise APIError(
@@ -220,6 +223,18 @@ def record_existing_submission(service, case, userid, reference):
 
 def run_applicant_batch(service, session, manifest, *, execute=False, progress=None):
     manifest = Path(manifest)
+    if read_json(manifest).get('schema')=='ustc-applicant-http-batch-v1':
+        from finance_native_create import ref
+        if execute:
+            from applicant_http_batch import manifest as validate_http_manifest
+            value=validate_http_manifest(service,ref(manifest),read_json(manifest)['case_id'])
+            session.ids=[r['case_id']for r in value['cases']]
+            checkpoint=service.root/'.local/applicant_batches'/ref(manifest)['sha256']/'state.json'
+            waiting=checkpoint.exists()and read_json(checkpoint).get('waiting_since')
+            pending=any(service.overview(cid).get('unverified_write')for cid in session.ids)
+            session.ensure(preserve_original=bool(waiting or pending))
+        return service.applicant_batch(read_json(manifest)['case_id'],ref(manifest),getattr(session,'state',{}).get('tab_id','0'),
+            'registered-http-approval-'+hashlib.sha256(manifest.read_bytes()).hexdigest()[:16],execute)
     userid = session.cfg['expected_userid']
     value, gates = validate_manifest(service, manifest, userid, execute)
     fingerprint = hashlib.sha256(manifest.read_bytes()).hexdigest()
@@ -445,7 +460,7 @@ def run_applicant_batch(service, session, manifest, *, execute=False, progress=N
                     + ' --phase approve --execute',
                 )
                 if value.get('show_verification_interface') is True:
-                    from native_finance_bridge import show_verification, status
+                    from registered_bridge import show_verification, status
 
                     session.recover_frozen()
                     row['verification_interface'] = show_verification(

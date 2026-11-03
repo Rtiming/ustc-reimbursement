@@ -90,8 +90,8 @@ async function inventory() {
 async function evaluate(args) {
   if (!['finance', 'access'].includes(args.scope) || typeof args.source !== 'string') throw new Error('invalid_evaluate');
   let tab = await target(args.tab_id, args.scope, args.expected_window_id ?? null);
-  if(args.scope==='finance'&&tab.frozen===true){await wakeFinanceTab(args);tab=await target(args.tab_id,args.scope,args.expected_window_id??null);}
-  if(args.scope==='finance'&&tab.active&&tab.autoDiscardable!==false)await chrome.tabs.update(tab.id,{autoDiscardable:false});
+  if(tab.frozen===true){await wakeFinanceTab(args);tab=await target(args.tab_id,args.scope,args.expected_window_id??null);}
+  if(tab.active&&tab.autoDiscardable!==false)await chrome.tabs.update(tab.id,{autoDiscardable:false});
   const values = await chrome.scripting.executeScript({target: {tabId: tab.id}, world: 'MAIN', injectImmediately: true,
     func: (source, scope) => {
       // 导航发生在tabs.get之后也必须再核对；不放宽站点CSP或认证限制。
@@ -110,8 +110,9 @@ async function evaluate(args) {
 
 async function wakeFinanceTab(args){
   if(Object.keys(args).some(k=>!['tab_id','expected_window_id','expected_epoch','scope','source'].includes(k)))throw Error('invalid_evaluate');
-  const tab=await target(args.tab_id,'finance',args.expected_window_id??null);
-  if(new URL(tab.url).pathname!=='/YBX/main.jsp')throw Error('wrong_origin');
+  const tab=await target(args.tab_id,args.scope==='access'?'access':'finance',args.expected_window_id??null);
+  const path=new URL(tab.url).pathname.split(';')[0];
+  if(!['/YBX/main.jsp',...(args.scope==='access'?['/cas/login','/YBX/login.html','/WFManager/home2.jsp']:[])].includes(path))throw Error('wrong_origin');
   if(tab.discarded)throw Error('tab_discarded');
   const win=await chrome.windows.get(tab.windowId,{populate:true});
   const active=(win.tabs||await chrome.tabs.query({windowId:tab.windowId})).find(t=>t.active);
@@ -137,33 +138,46 @@ async function wakeFinanceTab(args){
 
 async function relocateFinanceTab(args){
   if(SYNTHETIC)throw Error('synthetic_operation_disabled');
-  if(Object.keys(args).some(k=>!['tab_id','expected_window_id','expected_epoch'].includes(k))||!args.expected_window_id)throw Error('invalid_create');
-  const tab=await target(args.tab_id,'finance',args.expected_window_id);
+  if(Object.keys(args).some(k=>!['tab_id','expected_window_id','expected_epoch','scope','expected_active_tab_id'].includes(k))||!args.expected_window_id || args.scope && !['finance','access'].includes(args.scope))throw Error('invalid_create');
+  const tab=await target(args.tab_id,args.scope==='access'?'access':'finance',args.expected_window_id);
+  if(!['/YBX/main.jsp',...(args.scope==='access'?['/cas/login','/YBX/login.html','/WFManager/home2.jsp']:[])].includes(new URL(tab.url).pathname.split(';')[0]))throw Error('wrong_origin');
   const old=await chrome.windows.get(tab.windowId,{populate:true});
-  // 仅接续独立工作窗；不把用户混合窗口中的标签搬走，也不刷新原文档。
-  if(old.type!=='normal'||old.tabs?.length!==1||old.tabs[0].id!==tab.id||!tab.active||tab.discarded||tab.frozen!==true)throw Error('relocation_target_not_isolated_frozen');
+  // 混合窗口只移走后台原页，必须绑定同次盘点的活动标签；不切用户当前页。
+  const selection=args.expected_active_tab_id;
+  const isolated=old.tabs?.length===1&&old.tabs[0].id===tab.id&&tab.active;
+  const inactive=selection!==undefined&&/^[0-9]+$/.test(String(selection))&&!tab.active&&
+    String(selection)!==String(tab.id)&&old.tabs?.some(t=>t.active&&String(t.id)===String(selection));
+  if(selection!==undefined&&!inactive)throw Error('user_selection_changed');
+  if(old.type!=='normal'||(!isolated&&!inactive)||tab.discarded||tab.frozen!==true)throw Error('relocation_target_not_isolated_frozen');
   const created=await chrome.windows.create({tabId:tab.id,type:'normal',focused:false});
   const after=await chrome.tabs.get(tab.id);
   if(created.focused===true||after.windowId!==created.id||after.url!==tab.url)throw Error('relocation_result_unknown');
+  if(inactive){
+    const source=await chrome.windows.get(tab.windowId,{populate:true});
+    if(!source.tabs?.some(t=>t.active&&String(t.id)===String(selection)))throw Error('relocation_result_unknown');
+  }
   await chrome.tabs.update(tab.id,{autoDiscardable:false,active:true});
   let observed=await chrome.tabs.get(tab.id);
   for(let i=0;i<20&&observed.frozen===true;i++){await new Promise(r=>setTimeout(r,50));observed=await chrome.tabs.get(tab.id);}
   return{tab_id:String(tab.id),old_window_id:String(tab.windowId),window_id:String(created.id),relocated:true,
-    woken:observed.frozen===false,foreground_requested:false,navigation_requested:false,business_replayed:false,system_write:false};
+    woken:observed.frozen===false,source_active_tab_id:inactive?String(selection):null,
+    source_active_tab_preserved:inactive?true:null,foreground_requested:false,navigation_requested:false,business_replayed:false,system_write:false};
 }
 
-async function showVerification(args){
-  if(Object.keys(args).some(k=>!['tab_id','expected_window_id','expected_epoch','serial','expected_userid'].includes(k))||!/^\d+$/.test(args.serial||'')||!(/^[A-Za-z0-9]{2,40}$/).test(args.expected_userid||''))throw Error('invalid_evaluate');
+async function showVerification(args, approver=false){
+  const allowed=['tab_id','expected_window_id','expected_epoch','serial','expected_userid',...(approver?['node_id']:[])];
+  const node=approver?args.node_id:'508';
+  if(Object.keys(args).some(k=>!allowed.includes(k))||!/^\d+$/.test(args.serial||'')||!/^\d+$/.test(node||'')||!(/^[A-Za-z0-9]{2,40}$/).test(args.expected_userid||''))throw Error('invalid_evaluate');
   const tab=await target(args.tab_id,'finance',args.expected_window_id);
   const values=await chrome.scripting.executeScript({target:{tabId:tab.id},world:'MAIN',injectImmediately:true,
-    func:(serial,userid)=>{const visible=e=>!!e?.getClientRects().length;
+    func:(serial,userid,node)=>{const visible=e=>!!e?.getClientRects().length;
       return location.origin==='https://cwzh.ustc.edu.cn'&&location.pathname==='/YBX/main.jsp'&&window.$?.getProjID()==='WF_YBX'&&
-        $.UC.bindData('#0-userinfo.userid#')===userid&&$.UC.bindData('#61-serialno#')===serial&&String($.UC.bindData('#61-node_id#'))==='508'&&visible(document.getElementById('formWF_YBX_1362_t-code'));},
-    args:[args.serial,args.expected_userid]});
+        $.UC.bindData('#0-userinfo.userid#')===userid&&$.UC.bindData('#61-serialno#')===serial&&String($.UC.bindData('#61-node_id#'))===node&&visible(document.getElementById('formWF_YBX_1362_t-code'));},
+    args:[args.serial,args.expected_userid,node]});
   if(values.length!==1||values[0].result!==true)throw Error('verification_page_not_bound');
   await chrome.tabs.update(tab.id,{active:true,autoDiscardable:false});
   await chrome.windows.update(tab.windowId,{focused:true,state:'normal'});
-  return{shown:true,tab_id:String(tab.id),window_id:String(tab.windowId),serial:args.serial,verification_only:true,code_read:false,code_entered:false,approval_requested:false};
+  return{shown:true,tab_id:String(tab.id),window_id:String(tab.windowId),serial:args.serial,...(approver?{node_id:node}:{}),verification_only:true,code_read:false,code_entered:false,approval_requested:false};
 }
 
 async function createPage(args, entry = ENTRY) {
@@ -220,28 +234,43 @@ async function casLogin(args) {
       const button = document.getElementById('submitBtn');
       if (!visible(user) || passwords.length !== 1 || !visible(button)) return stopped('login_controls_not_ready');
       if (username !== expectedUsername || (user.value && user.value !== username)) return stopped('identity_mismatch');
-      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-      if (!setter) return stopped('login_controls_not_ready');
-      const sameControls = () => {
-        const current = [...document.querySelectorAll('input[type=password]')].filter(visible);
-        return document.getElementById('nameInput') === user && document.getElementById('submitBtn') === button &&
-          current.length === 1 && current[0] === passwords[0] && [user, passwords[0], button].every(e => e.ownerDocument === originalDocument && e.isConnected && visible(e));
-      };
-      for (const [element, value] of [[user, username], [passwords[0], password]]) {
-        const issue = guard();
-        if (issue) return stopped(issue);
-        if (!sameControls()) return stopped('login_controls_not_ready');
-        if (element === passwords[0] && user.value !== expectedUsername) return stopped('identity_mismatch');
-        setter.call(element, value);
-        element.dispatchEvent(new Event('input', {bubbles: true}));
-        element.dispatchEvent(new Event('change', {bubbles: true}));
+      // 官方CAS的UsernamePassword接口：AES/ECB/PKCS7后直接POST，不触发登录按钮或表单事件。
+      const nativeForm = document.getElementById('normalLoginForm');
+      const keyElement = document.getElementById('login-croypto');
+      if (!nativeForm || !keyElement || !globalThis.CryptoJS?.AES) return stopped('login_controls_not_ready');
+      let action; try { action = new URL(nativeForm.action, url.href); } catch (_) { return stopped('wrong_login_service'); }
+      if (action.origin !== url.origin || normalPath(action.pathname) !== '/cas/login' ||
+          action.searchParams.has('service') && action.searchParams.get('service') !== url.searchParams.get('service') || nativeForm.method.toLowerCase() !== 'post')
+        return stopped('wrong_login_service');
+      const hidden = name => [...nativeForm.elements].filter(e => e.name === name && e.type === 'hidden');
+      const fields = {};
+      for (const name of ['type', '_eventId', 'geolocation', 'execution', 'captcha_code']) {
+        const matches = hidden(name);
+        if (matches.length !== 1) return stopped('login_controls_not_ready');
+        fields[name] = matches[0].value;
       }
-      for (let i = 0; button.disabled && i < 10; i++) await new Promise(resolve => setTimeout(resolve, 50));
-      const finalGuard = guard();
-      if (finalGuard) return stopped(finalGuard);
-      if (!sameControls() || button.disabled || passwords[0].value !== password) return stopped('login_controls_not_ready');
-      if (user.value !== expectedUsername || user.value !== username) return stopped('identity_mismatch');
-      button.click();
+      if (fields.type !== 'UsernamePassword' || fields._eventId !== 'submit' || !fields.execution || fields.captcha_code)
+        return stopped(fields.captcha_code ? 'challenge_required' : 'login_controls_not_ready');
+      const keyText = keyElement.textContent.trim(), crypto = globalThis.CryptoJS;
+      if (!/^[A-Za-z0-9+/]+={0,2}$/.test(keyText)) return stopped('login_controls_not_ready');
+      const key = crypto.enc.Base64.parse(keyText);
+      if (![16, 24, 32].includes(key.sigBytes)) return stopped('login_controls_not_ready');
+      const encrypted = crypto.AES.encrypt(password, key, {mode: crypto.mode.ECB, padding: crypto.pad.Pkcs7}).toString();
+      const issue = guard();
+      if (issue) return stopped(issue);
+      if (document.getElementById('normalLoginForm') !== nativeForm || document.getElementById('login-croypto') !== keyElement ||
+          keyElement.textContent.trim() !== keyText || document.getElementById('nameInput') !== user ||
+          user.value && user.value !== expectedUsername || Object.entries(fields).some(([name, value]) => hidden(name).length !== 1 || hidden(name)[0].value !== value))
+        return stopped('login_controls_not_ready');
+      if (globalThis.__ustcCasHttpSubmitted) return {state: 'login_submitted', login_submitted: true};
+      const form = document.createElement('form');
+      form.method = 'POST'; form.action = action.href; form.style.display = 'none';
+      for (const [name, value] of Object.entries({...fields, username, password: encrypted, croypto: keyText})) {
+        const field = document.createElement('input'); field.type = 'hidden'; field.name = name; field.value = value; form.appendChild(field);
+      }
+      document.body.appendChild(form);
+      globalThis.__ustcCasHttpSubmitted = true;
+      HTMLFormElement.prototype.submit.call(form);
       return {state: 'login_submitted', login_submitted: true};
     }, args: [args.username, args.password, args.expected_username]});
   if (values.length !== 1 || typeof values[0].result?.state !== 'string') throw new Error('invalid_native_response');
@@ -292,6 +321,7 @@ async function dispatch(message) {
   if (message.operation === 'wake-finance-tab') return wakeFinanceTab(args);
   if (message.operation === 'relocate-finance-tab') return relocateFinanceTab(args);
   if (message.operation === 'show-verification') return showVerification(args);
+  if (message.operation === 'show-approver-verification') return showVerification(args,true);
   if (message.operation === 'page-read') {
     // Legacy envelope only: one top-level injection, no activation, reload, or retry.
     if (args.activate === true || args.all_frames === true) throw new Error('invalid_evaluate');

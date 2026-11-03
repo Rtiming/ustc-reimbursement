@@ -19,6 +19,25 @@ EXT='a'*32;EPOCH='b'*32;NS='edge-native-messaging:'+EXT+':'+EPOCH
 
 
 class MacBridgeTests(unittest.TestCase):
+    def test_mixed_frozen_page_binds_active_selection_and_requires_preservation(self):
+        observed={'tabs':[{'tab_id':'11','window_id':'1','active':False,'frozen':True}],
+                  'windows':[{'window_id':'1','active_tab_id':'10'}]}
+        options=mac.frozen_relocation_options(observed,'11','1')
+        self.assertEqual(options,{'expected_active_tab_id':'10'})
+        result={'tab_id':'11','old_window_id':'1','window_id':'2','relocated':True,'woken':True,
+                'foreground_requested':False,'navigation_requested':False,'business_replayed':False,
+                'source_active_tab_id':'10','source_active_tab_preserved':True}
+        with patch.object(mac,'status',return_value=self.current),patch.object(shared,'request',return_value=result) as send:
+            mac.relocate_finance_tab('11',tab_id_namespace=NS,expected_window_id='1',**options)
+            self.assertEqual(send.call_args.args[1]['expected_active_tab_id'],'10')
+        with patch.object(mac,'status',return_value=self.current),patch.object(shared,'request',return_value={**result,'source_active_tab_preserved':False}),self.assertRaises(mac.BridgeUnavailable):
+            mac.relocate_finance_tab('11',tab_id_namespace=NS,expected_window_id='1',**options)
+        for change in ({'discarded':True},{'frozen':False},{'window_id':'2'}):
+            with self.subTest(change=change),self.assertRaises(mac.BridgeUnavailable):
+                mac.frozen_relocation_options({**observed,'tabs':[{**observed['tabs'][0],**change}]},'11','1')
+        with self.assertRaises(mac.BridgeUnavailable):
+            mac.frozen_relocation_options({**observed,'windows':[]},'11','1')
+
     def test_relocation_retains_new_window_even_if_renderer_stays_frozen(self):
         result={'tab_id':'11','old_window_id':'1','window_id':'2','relocated':True,'woken':False,
                 'foreground_requested':False,'navigation_requested':False,'business_replayed':False}

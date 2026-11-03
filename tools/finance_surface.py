@@ -250,7 +250,7 @@ def snapshot_script():
  if(base.ok!==true)return base;
  const baseSerialization=base.serialization;
  const vis=e=>!!(e&&e.getClientRects().length);
- const protect=(key,value)=>/password|passwd|token|session|captcha|\byzm\b|\botp\b|csrf|authorization|cookie|formWF_YBX_1362_t-code/i.test(key)?'[protected]':
+ const protect=(key,value)=>/userContext|SSNID|password|passwd|token|session|captcha|\byzm\b|\botp\b|csrf|authorization|cookie|formWF_YBX_1362_t-code/i.test(key)?'[protected]':
   /account|bankacnt|cnt1|cardno|acnt/i.test(key)&&typeof value==='string'?value.replace(/\b\d{12,19}\b/g,m=>m.slice(0,4)+'****'+m.slice(-4)):value;
  const mask=protect;
  __BOUNDED_NATIVE_SERIALIZER__

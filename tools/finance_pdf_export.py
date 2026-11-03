@@ -19,6 +19,8 @@ from reimbursement_standards import _pairs, encoded, iso_date, read_json, safe_p
 
 ROOT = Path(__file__).resolve().parents[1]
 KIND = 'system_view_preview_not_final_print'
+FORMAL_KIND = 'system_formal_print'
+FORMAL_VIEWS = ('formal_print', 'formal_print_api')
 MAX_BYTES = 64 * 1024 * 1024
 MAX_CHUNK = 512 * 1024
 DEFAULT_CHUNK = 128 * 1024
@@ -38,7 +40,14 @@ function guard(){
  if(location.origin!=='https://cwzh.ustc.edu.cn'||location.pathname!=='/YBX/main.jsp'||
     window.$?.getProjID?.()!=='WF_YBX'||String($.UC.bindData('#0-userinfo.userid#')||'')!==c.expected_userid||
     String($.UC.bindData('#61-serialno#')||'')!==c.serial)throw Error('PDF_EXPORT_NATIVE_IDENTITY_MISMATCH');
- const outer=document.querySelector(c.view_kind==='details'?'#iframepage_pdf':'#iframepage_print');
+ const formal=c.view_kind==='formal_print';
+ if(formal){
+  const intent=Object.getOwnPropertyDescriptor(window,'__ustcSystemPrintIntentV1')?.value;
+  if(!intent||intent.kind!=='formal_print'||intent.phase!=='print_requested'||intent.case_id!==c.case_id||intent.serial!==c.serial||intent.userid!==c.expected_userid||intent.include_invoice_attachments!==c.include_invoice_attachments||window.YBX_JSONDATA?.['确认报销信息']?.['入口']!=='PDF打印报销单列表')throw Error('PDF_EXPORT_FORMAL_PRINT_PROOF_REQUIRED');
+ }
+ const candidates=formal?[...document.querySelectorAll('#iframepage_pdf,#iframepage_print')].filter(e=>e.getClientRects().length):[];
+ if(formal&&candidates.length!==1)throw Error('PDF_EXPORT_FORMAL_VIEWER_AMBIGUOUS');
+ const outer=formal?candidates[0]:document.querySelector(c.view_kind==='details'?'#iframepage_pdf':'#iframepage_print');
  if(!outer||!outer.getClientRects().length)throw Error('PDF_EXPORT_PREVIEW_NOT_VISIBLE');
  const viewer=outer.contentDocument?.querySelector('iframe')?.contentWindow;
  if(!viewer||viewer.location.origin!==location.origin)throw Error('PDF_EXPORT_SAME_ORIGIN_VIEWER_REQUIRED');
@@ -47,7 +56,7 @@ function guard(){
  const fingerprint=pdf.fingerprints?.[0]||pdf.fingerprint;
  if(typeof fingerprint!=='string'||!fingerprint||fingerprint.length>256)throw Error('PDF_EXPORT_FINGERPRINT_REQUIRED');
  const node=String($.UC.bindData('#61-node_id#')??'');
- if(!node&&c.view_kind!=='details')throw Error('PDF_EXPORT_NATIVE_NODE_REQUIRED');
+ if(!node&&!['details','formal_print'].includes(c.view_kind))throw Error('PDF_EXPORT_NATIVE_NODE_REQUIRED');
  return{pdf,fingerprint,node,viewerPath:viewer.location.origin+viewer.location.pathname};
 }
 async function documentSerial(pdf){
@@ -68,10 +77,10 @@ function state(){
     throw Error('PDF_EXPORT_DOCUMENT_CHANGED');
  return s;
 }
-function metadata(s){return{ok:true,kind:'system_view_preview_not_final_print',case_id:s.caseId,serial:s.serial,
+function metadata(s){return{ok:true,kind:c.view_kind==='formal_print'?'system_formal_print':'system_view_preview_not_final_print',case_id:s.caseId,serial:s.serial,
  userid:s.userid,origin:location.origin,pathname:location.pathname,project:'WF_YBX',node:s.node,
  session_token:s.token,pdf_fingerprint:s.fingerprint,pdf_serial:s.serial,pages:s.pages,size:s.bytes.length,
- sha256:s.sha256,viewer_path:s.viewerPath,view_kind:c.view_kind||'print_preview',system_write:false,approval_verified:false,final_print_verified:false};}
+ sha256:s.sha256,viewer_path:s.viewerPath,view_kind:c.view_kind||'print_preview',include_invoice_attachments:c.include_invoice_attachments,system_write:false,approval_verified:false,final_print_verified:c.view_kind==='formal_print'};}
 '''
 
 JS_ACTIONS = {
@@ -119,23 +128,11 @@ def _no_existing(path):
         raise FileExistsError('保留已有文件，不覆盖：' + str(path))
 
 
-def _request(case, plan, export_root, tab_id, expected_userid, silent, chunk_size):
-    if not isinstance(case, dict) or not re.fullmatch(r'[a-z][a-z0-9_-]{1,63}', str(case.get('case_id', ''))):
-        raise ValueError('须有明确本案case_id')
-    serial = case.get('serial')
-    if not isinstance(serial, str) or not re.fullmatch(r'\d+', serial):
-        raise ValueError('须有已经绑定的真实财务单号serial')
-    if not isinstance(tab_id, str) or not re.fullmatch(r'\d+', tab_id):
-        raise ValueError('须显式给当前财务tab_id字符串')
-    if not isinstance(expected_userid, str) or not re.fullmatch(r'[A-Za-z0-9]{2,40}', expected_userid):
-        raise ValueError('须给本案预期登录人expected_userid')
-    if case.get('expected_userid') not in (None, expected_userid):
-        raise ValueError('本案登录人与请求不符')
-    if type(silent) is not bool or type(chunk_size) is not int or not 1024 <= chunk_size <= MAX_CHUNK:
-        raise ValueError('silent须为布尔值；chunk_size须为1024至524288字节整数')
+def export_relative_path(case, plan):
+    """共享命名及内容选项合同；不访问目录、浏览器或PDF正文。"""
     if not isinstance(plan, dict) or plan.get('schema') != 'ustc-finance-pdf-export-plan-v1':
         raise ValueError('须给ustc-finance-pdf-export-plan-v1计划')
-    if plan.get('case_id') != case['case_id'] or plan.get('serial') != serial or plan.get('status') != 'confirmed':
+    if plan.get('case_id') != case['case_id'] or plan.get('serial') != case.get('serial') or plan.get('status') != 'confirmed':
         raise ValueError('导出计划须已确认并绑定同案同单号')
     if not isinstance(plan.get('source_refs'), list) or not plan['source_refs'] or any(not isinstance(x, str) or not x.strip() for x in plan['source_refs']):
         raise ValueError('导出计划须引用日期、序号和摘要的确认依据')
@@ -154,37 +151,91 @@ def _request(case, plan, export_root, tab_id, expected_userid, silent, chunk_siz
     if delivery_mode not in ('rename_only', 'content'):
         raise ValueError('导出后处理仅支持rename_only或显式content核对')
     view_kind=plan.get('view_kind','print_preview')
-    if view_kind not in ('print_preview','details'):raise ValueError('仅支持已核同案打印预览或查看明细PDF入口')
+    if view_kind not in ('print_preview','details','formal_print','formal_print_api'):raise ValueError('仅支持已核同案打印预览或查看明细PDF入口')
+    if plan.get('view_kind') in FORMAL_VIEWS and type(plan.get('include_invoice_attachments')) is not bool:
+        raise ValueError('正式打印必须明确是否包含附件')
     relative = day + '/' + safe_filename(str(sequence) + separator + summary) + '.pdf'
     if plan.get('relative_path') not in (None, relative):
         raise ValueError('计划relative_path与确认日期/序号/摘要不一致')
+    return relative
+
+
+def _http_pdf_request(request):
+    return request.get('view_kind')=='formal_print_api' or request.get('details_transport')=='native_http'
+
+
+def _request(case, plan, export_root, tab_id, expected_userid, silent, chunk_size, *, details_native=True):
+    if not isinstance(case, dict) or not re.fullmatch(r'[a-z][a-z0-9_-]{1,63}', str(case.get('case_id', ''))):
+        raise ValueError('须有明确本案case_id')
+    serial = case.get('serial')
+    if not isinstance(serial, str) or not re.fullmatch(r'\d+', serial):
+        raise ValueError('须有已经绑定的真实财务单号serial')
+    if not isinstance(tab_id, str) or not re.fullmatch(r'\d+', tab_id):
+        raise ValueError('须显式给当前财务tab_id字符串')
+    if not isinstance(expected_userid, str) or not re.fullmatch(r'[A-Za-z0-9]{2,40}', expected_userid):
+        raise ValueError('须给本案预期登录人expected_userid')
+    if case.get('expected_userid') not in (None, expected_userid):
+        raise ValueError('本案登录人与请求不符')
+    if type(silent) is not bool or type(chunk_size) is not int or not 1024 <= chunk_size <= MAX_CHUNK:
+        raise ValueError('silent须为布尔值；chunk_size须为1024至524288字节整数')
+    relative = export_relative_path(case, plan)
+    native_details=plan.get('view_kind')=='details' and details_native
+    if plan.get('view_kind')=='formal_print_api' or native_details:
+        from validate_config import money
+        if ((not native_details and money(plan.get('amount')) != money(case.get('amount')))
+                or native_details and plan.get('amount')is not None and money(plan['amount'])!=money(case.get('amount'))
+                or plan.get('summary') != case.get('basic',{}).get('fields',{}).get('t-abst') or plan.get('delivery_mode','rename_only') != 'rename_only'):
+            raise ValueError('HTTP接口导出须绑定本案金额、摘要及rename_only模式')
+    delivery_mode = plan.get('delivery_mode', 'rename_only')
+    view_kind = plan.get('view_kind', 'print_preview')
     destination = safe_path(export_root, relative)
     _no_existing(destination)
+    details={}
+    if native_details:
+        details={'details_transport':'native_http','details_api_version':1,
+            'details_contract':read_json(ROOT/'data/finance_details_contract.json'),
+            'basic_contracts':read_json(ROOT/'data/finance_business_contracts.json')['domains']['basic']}
     return {'case_id': case['case_id'], 'serial': serial, 'tab_id': tab_id, 'expected_userid': expected_userid,
             'silent': silent, 'chunk_size': chunk_size, 'max_bytes': MAX_BYTES, 'max_chunk': MAX_CHUNK,
+            **({'expected_amount':format(money(case['amount']),'.2f'), 'expected_summary':plan['summary']} if view_kind=='formal_print_api' or native_details else {}),
+            **details,
             'relative_path': relative, 'destination': str(destination), 'plan_sha256': digest(encoded(plan)),
-            'delivery_mode': delivery_mode,'view_kind':view_kind}
+            'delivery_mode': delivery_mode,'view_kind':view_kind,
+            **({'include_invoice_attachments':plan['include_invoice_attachments']} if view_kind in FORMAL_VIEWS else {})}
 
 
 def pdf_script(action, config):
+    if config.get('details_transport')=='native_http':
+        if action not in JS_ACTIONS:raise ValueError('未知明细PDF接口阶段')
+        from finance_http import source
+        return '(async()=>{'+source('details')+';return await reimbursementDetailsApi('+json.dumps({**config,'action':action},ensure_ascii=False)+');})()'
+    if config.get('view_kind')=='formal_print_api':
+        if action not in JS_ACTIONS:raise ValueError('未知正式打印接口阶段')
+        from finance_http import source
+        return '(async()=>{'+source('print')+';return await reimbursementPrintApi('+json.dumps({**config,'action':action},ensure_ascii=False)+');})()'
     if action not in JS_ACTIONS:
         raise ValueError('只允许begin/chunk/finish固定读取动作')
     return '(async()=>{\n' + JS_COMMON.replace('CONFIG', json.dumps(config, ensure_ascii=False)) + JS_ACTIONS[action] + '\n})()'
 
 
 def _metadata(value, request):
-    if not isinstance(value, dict) or value.get('ok') is not True or value.get('kind') != KIND:
+    if not isinstance(value, dict) or value.get('ok') is not True or value.get('kind') != (FORMAL_KIND if request.get('view_kind') in FORMAL_VIEWS else KIND):
         raise ValueError('未取得成功的真实PDF预览回执')
+    if request.get('view_kind') in FORMAL_VIEWS and (value.get('final_print_verified') is not True or value.get('include_invoice_attachments') is not request['include_invoice_attachments']):
+        raise ValueError('正式打印回执的来源或附件选项不符')
+    if request.get('details_transport')=='native_http' and (value.get('details_transport')!='native_http' or value.get('business_transport')!='native_http'
+            or value.get('final_print_verified')is not False or value.get('approval_verified')is not False):
+        raise ValueError('明细HTTP预览来源不符，不能升级为正式打印或审批')
     expected = {'case_id': request['case_id'], 'serial': request['serial'], 'userid': request['expected_userid'],
                 'origin': 'https://cwzh.ustc.edu.cn', 'pathname': '/YBX/main.jsp', 'project': 'WF_YBX',
                 'pdf_serial': request['serial'], 'session_token': request['session_token']}
     if any(value.get(k) != v for k, v in expected.items()):
         raise ValueError('原生PDF回执案件、登录人、单号、会话或页面身份不符')
     if (type(value.get('size')) is not int or not 8 <= value['size'] <= MAX_BYTES
-            or type(value.get('pages')) is not int or not 1 <= value['pages'] <= 2000
+            or (value.get('pages') is not None if _http_pdf_request(request) else type(value.get('pages')) is not int or not 1 <= value['pages'] <= 2000)
             or not re.fullmatch(r'[a-f0-9]{64}', str(value.get('sha256', '')))
             or not isinstance(value.get('pdf_fingerprint'), str) or not value['pdf_fingerprint']
-            or not isinstance(value.get('node'), str) or (not value['node'] and request.get('view_kind')!='details')
+            or not isinstance(value.get('node'), str) or (not value['node'] and request.get('view_kind') not in ('details',*FORMAL_VIEWS))
             or not re.fullmatch(r'[a-f0-9]{32}', str(value.get('session_token', '')))
             or not isinstance(value.get('viewer_path'), str) or not value['viewer_path'].startswith('https://cwzh.ustc.edu.cn/')):
         raise ValueError('原生PDF回执长度、页数、SHA或文档指纹无效')
@@ -259,7 +310,8 @@ def _evidence_result(entry, tab_id):
 def persist_verified_pdf(raw, metadata, case, export_plan, export_root, receipt_path,
                          *, tab_id, expected_userid, source_evidence=None):
     """无runtime证据链时只允许显式合成测试，输出明确标为合成。"""
-    request = _request(case, export_plan, export_root, tab_id, expected_userid, True, DEFAULT_CHUNK)
+    request = _request(case, export_plan, export_root, tab_id, expected_userid, True, DEFAULT_CHUNK,
+        details_native=metadata.get('details_transport')=='native_http')
     request['session_token'] = metadata.get('session_token')
     _metadata(metadata, request)
     if request['delivery_mode'] == 'content':
@@ -293,14 +345,16 @@ def persist_verified_pdf(raw, metadata, case, export_plan, export_root, receipt_
         raise ValueError('回执和PDF不能使用同一路径')
     _no_existing(receipt)
     result = {'schema': 'ustc-finance-pdf-export-v1', 'ok': True, 'status': 'ready', 'case_id': case['case_id'],
-              'serial': case['serial'], 'kind': 'synthetic_test_pdf_not_finance' if synthetic else KIND,
-              'source_type': 'synthetic_test' if synthetic else 'native_pdf_viewer',
+              'serial': case['serial'], 'kind': 'synthetic_test_pdf_not_finance' if synthetic else (FORMAL_KIND if request['view_kind'] in FORMAL_VIEWS else KIND),
+              'source_type': 'synthetic_test' if synthetic else ('native_business_api' if _http_pdf_request(request) else 'native_pdf_viewer'),
               'pdf': str(destination), 'pdf_sha256': digest(raw), 'size': len(raw), 'pages': metadata['pages'],
               'plan_sha256': request['plan_sha256'], 'export_plan': export_plan,
               'document_identity': {k: metadata.get(k,'print_preview') if k=='view_kind' else metadata[k] for k in IDENTITY_KEYS}, 'source_evidence': source_evidence,
-              'system_write': False, 'approval_verified': False, 'final_print_verified': False,
+              'system_write': _http_pdf_request(request), 'business_transport':metadata.get('business_transport','legacy_viewer'), 'approval_verified': False, 'final_print_verified': not synthetic and request['view_kind'] in FORMAL_VIEWS,
               'delivery_mode':request['delivery_mode'], 'content_verified':request['delivery_mode']=='content',
               'needed_inputs': [], 'receipt': str(receipt)}
+    if request.get('details_transport')=='native_http':
+        result['details_transport']='native_http'
     _atomic_new(destination, raw)
     _atomic_new(receipt, encoded(result))
     return result
@@ -407,6 +461,9 @@ def _inspect_binding(intent, expected_binding):
             or plan.get('case_id') != request['case_id'] or plan.get('serial') != request['serial']
             or plan.get('status') != 'confirmed' or digest(encoded(plan)) != request['plan_sha256']):
         raise ValueError('原意图的导出计划内容与冻结身份/SHA不符')
+    if (request.get('view_kind', 'print_preview') != plan.get('view_kind', 'print_preview')
+            or plan.get('view_kind') in FORMAL_VIEWS and request.get('include_invoice_attachments') is not plan.get('include_invoice_attachments')):
+        raise ValueError('原意图的打印来源或附件选项变化')
     day = iso_date(plan.get('business_date')).isoformat()
     sequence, summary = plan.get('sequence'), plan.get('summary')
     if not ((type(sequence) is int and sequence > 0) or
@@ -416,6 +473,8 @@ def _inspect_binding(intent, expected_binding):
         raise ValueError('原导出计划缺少明确摘要')
     separator=plan.get('filename_separator','_')
     if separator not in ('_',' '):raise ValueError('原意图文件名分隔无效')
+    if plan.get('view_kind') in FORMAL_VIEWS and type(plan.get('include_invoice_attachments')) is not bool:
+        raise ValueError('正式打印必须明确是否包含附件')
     relative = day + '/' + safe_filename(str(sequence) + separator + summary) + '.pdf'
     if request.get('relative_path') != relative or destination.parent.name != day or destination.name != Path(relative).name:
         raise ValueError('原意图PDF目的地与确认日期/序号/摘要不符')
@@ -515,10 +574,13 @@ def inspect_export(output_directory, expected_binding=None):
                               ('userid', request['expected_userid']), ('session_token', request.get('session_token'))):
             if identity.get(key) != expected:
                 raise ValueError('PDF回执原生身份与原意图不同：' + key)
-        if (result.get('kind') not in (KIND, 'synthetic_test_pdf_not_finance')
+        if (result.get('kind') not in (KIND, FORMAL_KIND, 'synthetic_test_pdf_not_finance')
                 or not re.fullmatch(r'[a-f0-9]{64}', str(result.get('pdf_sha256', '')))):
             raise ValueError('PDF回执种类或字节SHA不合法')
-        _inspect_evidence_paths(result.get('source_evidence'), output, snapshots, complete=result['kind'] == KIND)
+        if result.get('kind') == FORMAL_KIND and (request.get('view_kind') not in FORMAL_VIEWS
+                or identity.get('view_kind') not in FORMAL_VIEWS or result.get('final_print_verified') is not True):
+            raise ValueError('正式打印回执缺少同一冻结入口证明')
+        _inspect_evidence_paths(result.get('source_evidence'), output, snapshots, complete=result['kind'] in (KIND, FORMAL_KIND))
         verified = False
         if destination.exists():
             raw, snapshot = _read_snapshot(export_root, pdf_relative, MAX_BYTES)
@@ -527,7 +589,7 @@ def inspect_export(output_directory, expected_binding=None):
         ready = verified and job_status not in ('unknown', 'failed')
         problems = [] if ready else [{'field': 'original_export', 'code': 'ORIGINAL_JOB_UNRESOLVED' if verified else 'PDF_READBACK_MISMATCH',
                                      'detail': '仅核验现有字节；原任务仍未完成，不自动升级状态' if verified else 'PDF缺失或当前字节与原回执不符'}]
-        return {**result, **common, 'status': 'ready' if ready else 'blocked', 'ok': ready,
+        return {**result, **common, 'final_print_verified': ready and result.get('kind')==FORMAL_KIND, 'status': 'ready' if ready else 'blocked', 'ok': ready,
                 'artifact_readback_verified': verified, 'needed_inputs': problems}
     return {**common, 'ok': False, 'status': 'blocked', 'kind': KIND,
             'pdf_exists': destination.exists(), 'artifact_readback_verified': False,
@@ -536,13 +598,15 @@ def inspect_export(output_directory, expected_binding=None):
 
 
 def _runtime_stage(action, request, output, index):
+    from registered_page_owner import RegisteredPageOwner
+    RegisteredPageOwner.before_child_dispatch(request['tab_id'])
     source = pdf_script(action, request)
     script, receipt = output / f'{index:05d}_{action}.js', output / f'{index:05d}_{action}.json'
     with script.open('x', encoding='utf-8', newline='\n') as handle:
         handle.write(source)
     command = [sys.executable, str(ROOT / 'tools/edge_runtime.py'), str(script), '--output', str(receipt),
                '--quiet', '--tab-id', request['tab_id'], '--timeout', '45', '--operation-kind',
-               'read' if action == 'chunk' else 'browser-local']
+               'write' if _http_pdf_request(request) and action=='begin' and not request.get('recovery') else 'read' if action == 'chunk' else 'browser-local']
     if not request['silent']:
         command.append('--foreground')
     result = subprocess.run(command, capture_output=True, timeout=60,
@@ -557,8 +621,44 @@ def _runtime_stage(action, request, output, index):
     return record['result'], {'path': str(receipt), 'sha256': digest(receipt.read_bytes())}
 
 
+def print_recovery(output_directory, expected_binding):
+    """只恢复已收到生成引用、被本地格式校验拒绝的原文件；不重发打印。"""
+    output = _inspection_root(output_directory)
+    intent, snap = _json_snapshot(output,'intent.json',MAX_INTENT_JSON)
+    request, destination, _, _ = _inspect_binding(intent,expected_binding)
+    is_details=request.get('details_transport')=='native_http' and request.get('details_api_version')==1
+    if not _http_pdf_request(request) or destination.exists():
+        raise ValueError('原任务不是待下载的固定HTTP接口导出')
+    record, stage = _json_snapshot(output,'stages/00000_begin.json',MAX_STAGE_JSON)
+    script, _ = _read_snapshot(output,'stages/00000_begin.js',MAX_STAGE_SCRIPT)
+    if (record.get('phase')!='script_completed' or record.get('tab_id')!=request['tab_id']
+            or digest(script)!=record.get('source_sha256')):
+        raise ValueError('原生成结果尚未明确完成，不恢复下载')
+    error=record.get('result',{}).get('error','')
+    if is_details:
+        result=record.get('result',{})
+        if error=='DETAILS_API_BILL_STATE_OR_SUMMARY':
+            return {'session_token':request['session_token'],'kind':'native_details_read_rejection',
+                'source_sha256':stage['sha256'],'source_intent_sha256':snap['sha256']}
+        if result.get('ok')is True:
+            _metadata(result,request)
+            if result.get('action')!='pdf_begin':raise ValueError('原明细文件尚未生成')
+        elif error not in {'DETAILS_API_DOWNLOAD_UNKNOWN','DETAILS_API_FILE_DOWNLOAD_FAILED','DETAILS_API_INVALID_PDF_BYTES','DETAILS_API_PDF_REFERENCE_INVALID'}:
+            raise ValueError('原明细生成尚未确认；只恢复原marker，不重发生成')
+        return {'session_token':request['session_token'],'kind':'native_details_original',
+            'source_sha256':stage['sha256'],'source_intent_sha256':snap['sha256']}
+    if error=='PRINT_API_PENDING_RECOVER_ORIGINAL':
+        return {'kind':'not_dispatched','source_sha256':stage['sha256'],'source_intent_sha256':snap['sha256']}
+    if error=='PRINT_API_BILL_CONTENT_MISMATCH':
+        return {'session_token':request['session_token'],'kind':'read_rejection','source_sha256':stage['sha256'],'source_intent_sha256':snap['sha256']}
+    match=re.fullmatch(r'PRINT_API_PDF_REFERENCE_INVALID:([-A-Za-z0-9_]{1,100}&[^&\r\n]{1,250}&\.[Pp][Dd][Ff](?:&[-A-Za-z0-9_]{1,100})?)',error)
+    if not match:raise ValueError('原失败没有已确认的PDF文件引用；不得重发生成请求')
+    return {'session_token':request['session_token'],'reference':match[1],
+            'source_sha256':stage['sha256'],'source_intent_sha256':snap['sha256']}
+
+
 def export_pdf(case, export_plan, export_root, output_directory, tab_id, expected_userid,
-               silent=True, execute=False, chunk_size=DEFAULT_CHUNK):
+               silent=True, execute=False, chunk_size=DEFAULT_CHUNK, recovery=None):
     request = _request(case, export_plan, export_root, tab_id, expected_userid, silent, chunk_size)
     if type(execute) is not bool:
         raise ValueError('execute须为布尔值')
@@ -575,13 +675,18 @@ def export_pdf(case, export_plan, export_root, output_directory, tab_id, expecte
         raise ValueError('新的任务目录不能是符号链接')
     output = Path(output_directory).resolve()
     output.mkdir(parents=True, exist_ok=False)
-    request['session_token'] = uuid.uuid4().hex
-    (output / 'intent.json').write_bytes(encoded({'request': request, 'export_plan': export_plan, 'system_write': False}))
+    request['session_token'] = recovery['session_token'] if recovery else uuid.uuid4().hex
+    if recovery:request['recovery']=recovery
+    (output / 'intent.json').write_bytes(encoded({'request': request, 'export_plan': export_plan, 'system_write': _http_pdf_request(request)}))
     stage_dir = output / 'stages'
     stage_dir.mkdir()
     evidence = {'begin': None, 'chunks': [], 'finish': None}
     try:
         initial, evidence['begin'] = _runtime_stage('begin', request, stage_dir, 0)
+        if _http_pdf_request(request) and initial.get('school_rejected') is True:
+            result={**initial,'status':'ready','source_evidence':evidence,'executed':True}
+            _atomic_new(output/'rejection_receipt.json',encoded(result))
+            return result
         _metadata(initial, request)
         if initial.get('action') != 'pdf_begin':
             raise ValueError('首次读取不是原PDF冻结回执')
@@ -605,7 +710,7 @@ def export_pdf(case, export_plan, export_root, output_directory, tab_id, expecte
     except Exception as exc:
         result = {'schema': 'ustc-finance-pdf-export-failure-v1', 'ok': False, 'status': 'blocked',
                   'case_id': case['case_id'], 'serial': case['serial'], 'kind': KIND, 'error': str(exc),
-                  'output_directory': str(output), 'source_evidence': evidence, 'system_write': False,
+                  'output_directory': str(output), 'source_evidence': evidence, 'system_write': _http_pdf_request(request),
                   'executed': None, 'read_attempted': True, 'execution_status': 'incomplete_read_inspect_original',
                   'approval_verified': False, 'final_print_verified': False,
                   'needed_inputs': [{'field': 'original_read_receipt', 'code': 'PDF_READ_NOT_VERIFIED',
@@ -625,6 +730,7 @@ def main():
         parser.add_argument('--' + name, type=Path)
     parser.add_argument('--tab-id')
     parser.add_argument('--expected-userid')
+    parser.add_argument('--recovery',type=Path)
     parser.add_argument('--silent', action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument('--execute', action='store_true')
     parser.add_argument('--chunk-size', type=int, default=None)
@@ -638,7 +744,7 @@ def main():
             parser.error('须给--case/--plan/--export-root/--output-directory/--tab-id/--expected-userid；旧--pdf/--receipt入口已停用')
         chunk_size=args.chunk_size if args.chunk_size is not None else (MAX_CHUNK if os.environ.get('REIMBURSEMENT_EDGE_BACKEND')=='edge_native_messaging' else DEFAULT_CHUNK)
         result = export_pdf(read_json(args.case), read_json(args.plan), args.export_root, args.output_directory,
-                            args.tab_id, args.expected_userid, args.silent, args.execute, chunk_size)
+                            args.tab_id, args.expected_userid, args.silent, args.execute, chunk_size, read_json(args.recovery) if args.recovery else None)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result['status'] == 'ready' else 2
 

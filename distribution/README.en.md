@@ -1,5 +1,11 @@
 # USTC Reimbursement Toolkit
 
+[中文](README.md)
+
+A local USTC reimbursement workbench shared by people and AI agents. Import and review materials, connect payment and itinerary evidence, split reviewed invoices into local cases, continue form preparation, handle missing items, and export Excel checklists and A4 attachments. The desktop UI, compact MCP tools and CLI share the same cases, confirmations and recovery records.
+
+The Windows offline bundle includes a pinned Python runtime and dependencies. Extract it and launch the included installer. School login, SMS verification and real financial acceptance remain separate, on the user’s own computer.
+
 [English](README.en.md) | [中文](README.md)
 
 A local reimbursement assistant for people and AI agents: document intake and archiving, PDF/OCR, sourced policy profiles, CLI/JSON, and stdio MCP. The browser adapter targets the University of Science and Technology of China (USTC). This is an independent project, not an official university service.

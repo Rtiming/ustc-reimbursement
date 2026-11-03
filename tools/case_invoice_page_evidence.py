@@ -113,11 +113,13 @@ def audit_existing_pages(source, read_verified):
             raise ValueError('缺少逐页目视字段核对方法')
         if not isinstance(number, str) or not re.fullmatch(r'[0-9]{20}', number) or (number, page) not in expected:
             raise ValueError('目视票号/页码与本案登记不符')
-        if any(not isinstance(fields.get(k), str) or not fields[k].strip() for k in FIELDS):
-            raise ValueError('目视购方、税号、日期及净税总额字段不完整')
         parsed = fields_from_page(text, page, USTC['title'], USTC['tax_id'])
-        if parsed.get('invoice_number_candidates') != [number] or parsed.get('kind') != 'vat':
-            raise ValueError('既有OCR完整票号与目视/登记不一致或非已适配普通发票')
+        airline=parsed.get('kind')=='aviation_vat'
+        required=tuple(k for k in FIELDS if not airline or k!='net_amount')
+        if any(not isinstance(fields.get(k),str) or not fields[k].strip() for k in required):
+            raise ValueError('目视购方、税号、日期及金额字段不完整')
+        if parsed.get('invoice_number_candidates') != [number] or parsed.get('kind') not in {'vat','aviation_vat'}:
+            raise ValueError('既有OCR完整票号与目视/登记不一致或票种未适配')
         # 不用视觉数据盖掉另一笔明确的OCR字段；布局丢失的空字段才允许补齐。
         tight = normalize(text)
         for k in ('buyer_title', 'buyer_tax_id'):
@@ -131,24 +133,40 @@ def audit_existing_pages(source, read_verified):
             raise ValueError('目视开票日期无效') from error
         if parsed.get('issue_date') != issued:
             raise ValueError('既有OCR与目视开票日期不一致')
-        net, tax, total = (_money(fields[k]) for k in ('net_amount', 'tax_amount', 'total_amount'))
-        if net + tax != total or parsed.get('total_amount') is None or _money(parsed['total_amount']) != total:
-            raise ValueError('OCR小写/大写合计与目视净税总额不闭合')
-        for k in ('net_amount', 'tax_amount', 'total_amount'):
+        if airline:
+            # 民航基金等独立分项不能虚构成票面未印出的净额；按六个原表分项闭合。
+            keys=('fare','fuel_fee','vat','civil_aviation_fund','other_taxes','total')
+            components=fields.get('aviation_components')
+            parsed_components=parsed.get('aviation_components') or {}
+            if fields.get('net_amount') not in (None,'') or not isinstance(components,dict) or set(components)!=set(keys):
+                raise ValueError('航空票须保留原生分项且不填造未打印净额')
+            if any(parsed_components.get(k) is None or _money(components[k])!=_money(parsed_components[k]) for k in keys):
+                raise ValueError('航空OCR分项与目视金额不一致')
+            total=_money(components['total'])
+            if sum(_money(components[k]) for k in keys if k!='total')!=total or _money(fields['total_amount'])!=total or _money(fields['tax_amount'])!=_money(components['vat']):
+                raise ValueError('航空分项、税额及总额不闭合')
+            amounts=('tax_amount','total_amount')
+        else:
+            net,tax,total=(_money(fields[k]) for k in ('net_amount','tax_amount','total_amount'))
+            if net+tax!=total or parsed.get('total_amount') is None or _money(parsed['total_amount'])!=total:
+                raise ValueError('OCR小写/大写合计与目视净税总额不闭合')
+            amounts=('net_amount','tax_amount','total_amount')
+        for k in amounts:
             value = _money(fields[k])
             present = any(Decimal(x.replace(',', '')) == value for x in re.findall(r'(?<![\d.])\d[\d,]*\.\d{1,2}(?!\d)', text))
             if not present or (parsed.get(k) is not None and _money(parsed[k]) != value):
                 raise ValueError('目视金额缺少OCR数值支持或与已解析字段冲突：' + k)
-        parsed.update({k: fields[k] for k in FIELDS})
+        parsed.update({k: fields.get(k) for k in FIELDS})
         parsed['validation'].update(buyer_tax_id=check_tax_id(fields['buyer_tax_id']),
             title_matches_expected=True, tax_id_matches_expected=True)
         removable = {'BUYER_FIELDS_NEEDS_REVIEW', 'NET_AMOUNT_NEEDS_REVIEW'}
-        if any(x not in removable for x in parsed['issues']):
+        allowed=removable|({'AVIATION_QUERY_AMOUNT_RULE_NEEDS_REVIEW'} if airline else set())
+        if any(x not in allowed for x in parsed['issues']):
             raise ValueError('已有证据仍存在未解决票面问题：' + ','.join(parsed['issues']))
-        parsed['issues'] = []
+        parsed['issues'] = [x for x in parsed['issues'] if x not in removable]
         parsed['extraction_method'] = 'existing_remote_ocr_and_visual'
         parsed['verification']['fields'].update(invoice_number=number, issue_date=issued,
-            total_amount=fields['total_amount'], net_amount=fields['net_amount'])
+            total_amount=fields['total_amount'], net_amount=fields.get('net_amount'))
         parsed['field_evidence'] = copy.deepcopy(row)
         pages.append(parsed); receipts.append(copy.deepcopy(row))
     if {(n, p['page']) for p in pages for n in p['invoice_number_candidates']} != expected:

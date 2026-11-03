@@ -3,6 +3,125 @@
   "mcp_sdk": "2.2.0",
   "tools": [
     {
+      "name": "reimbursement_assist",
+      "description": "简明入口。discover选操作、schema取字段、call只读或预览；改动prepare返回冻结计划，获用户明确授权后confirm原intent_id。status接续原任务。无需GUI，不猜参数或重试未知写入。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "default": "discover",
+            "enum": [
+              "discover",
+              "schema",
+              "call",
+              "prepare",
+              "confirm",
+              "status"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Group"
+          },
+          "operation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Operation"
+          },
+          "inputs": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Inputs"
+          },
+          "case_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Case Id"
+          },
+          "intent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Intent Id"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Job Id"
+          },
+          "confirmation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Confirmation"
+          }
+        },
+        "title": "reimbursement_assistArguments"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "reimbursement_assistDictOutput",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
       "name": "reimbursement_capabilities",
       "description": "不知道从哪里开始先调用。材料/规范/OCR发现仅返回离线工具，不探测用户浏览器资料；财务/导出才检查正式桥接线。均不启动浏览器或改写单据。",
       "inputSchema": {
@@ -12,6 +131,7 @@
             "default": "materials",
             "enum": [
               "materials",
+              "review",
               "rules",
               "ocr",
               "finance",
@@ -30,6 +150,317 @@
       },
       "annotations": {
         "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "reimbursement_material_review",
+      "description": "本机反馈台统一入口。list查已登记工作台；workspace须位于material-root内。register只登记入口，summary读取回复/缺项/原单去向，open启动或复用本地页面。不会建财务单、保存或提交。构建、补件、复核与导出合同见guide review。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "default": "list",
+            "enum": [
+              "list",
+              "register",
+              "summary",
+              "start",
+              "open",
+              "status",
+              "doctor",
+              "stop"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "workspace": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Workspace"
+          },
+          "port": {
+            "default": 8766,
+            "title": "Port",
+            "type": "integer"
+          }
+        },
+        "title": "reimbursement_material_reviewArguments"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "reimbursement_material_reviewDictOutput",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "reimbursement_case_materials",
+      "description": "从本活动已导入原件登记明白纸、费用和付款/行程关联，打开补件工作台或按已选规则分单。无需技术路径；inspect返回材料身份、当前修订及下一步。保存为本地记录，不办理财务。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "case_id": {
+            "title": "Case Id",
+            "type": "string"
+          },
+          "action": {
+            "default": "inspect",
+            "enum": [
+              "inspect",
+              "save_document",
+              "save_expenses",
+              "remove_expense",
+              "save_issue",
+              "plan",
+              "review_open",
+              "save_dispositions",
+              "materialize",
+              "delivery_plan",
+              "delivery_build"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "values": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Values"
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Revision"
+          },
+          "confirmation_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Confirmation Note"
+          },
+          "execute": {
+            "default": false,
+            "title": "Execute",
+            "type": "boolean"
+          },
+          "offset": {
+            "default": 0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "limit": {
+            "default": 50,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "case_id"
+        ],
+        "title": "reimbursement_case_materialsArguments"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "reimbursement_case_materialsDictOutput",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "reimbursement_case_delivery",
+      "description": "本案交付：inspect查看原计划；plan只填写已核业务日期、序号、明细/正式打印及附件选项，账号单号和来源自动绑定。核对后export使用固定HTTP导出，status独立检查PDF字节，resume只接续原导出，不重造文件或覆盖已有PDF。不要求手抄计划文件或job。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "case_id": {
+            "title": "Case Id",
+            "type": "string"
+          },
+          "action": {
+            "default": "inspect",
+            "enum": [
+              "inspect",
+              "plan",
+              "export",
+              "status",
+              "resume"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "business_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Business Date"
+          },
+          "sequence": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Sequence"
+          },
+          "kind": {
+            "default": "details",
+            "enum": [
+              "details",
+              "formal"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "include_invoice_attachments": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Include Invoice Attachments"
+          },
+          "plan_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Plan Id"
+          },
+          "confirmation_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Confirmation Note"
+          },
+          "execute": {
+            "default": false,
+            "title": "Execute",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "case_id"
+        ],
+        "title": "reimbursement_case_deliveryArguments"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "reimbursement_case_deliveryDictOutput",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "reimbursement_standards_import",
+      "description": "预览或导入用户选定的私人规范包ustc-private-standards-bundle-v1。自动使用安装时私人库，仅新增专项或替换空模板，已有非空专项不同则拒绝。预览显示规则范围及库快照；执行必须原expected_snapshot，保留原包/旧版/回读及事务。材料规则存在私人库，不修改发行源码或财务记录。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "bundle": {
+            "additionalProperties": true,
+            "title": "Bundle",
+            "type": "object"
+          },
+          "execute": {
+            "default": false,
+            "title": "Execute",
+            "type": "boolean"
+          },
+          "expected_snapshot": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Snapshot"
+          }
+        },
+        "required": [
+          "bundle"
+        ],
+        "title": "reimbursement_standards_importArguments"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "reimbursement_standards_importDictOutput",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": false,
         "destructiveHint": false,
         "openWorldHint": false
       }
@@ -170,6 +601,7 @@
               "materials",
               "approve",
               "export-system",
+              "print",
               "export-list",
               "finish"
             ],
@@ -206,8 +638,16 @@
         "type": "object",
         "properties": {
           "library_root": {
-            "title": "Library Root",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Library Root"
           },
           "profile_id": {
             "anyOf": [
@@ -222,9 +662,6 @@
             "title": "Profile Id"
           }
         },
-        "required": [
-          "library_root"
-        ],
         "title": "reimbursement_standards_readArguments"
       },
       "outputSchema": {
@@ -777,7 +1214,7 @@
     },
     {
       "name": "reimbursement_pdf_export",
-      "description": "导出已打开的同案PDF预览，默认仅计划、默认静默。确认计划含日期/序号/摘要，执行绑定账号/tab/单号并分块核验，拒绝覆盖。返回job_id后查result；预览不是正式打印件。",
+      "description": "固定HTTP导出同案PDF：details为学校打印历史明细预览，formal_print_api为正式打印。默认仅计划、静默；日期/序号/摘要及账号/单号/金额绑定，逐块和整件SHA核验原始字节，拒绝覆盖。resume_job_id只恢复已确认生成的原文件，未知生成不重发；source_job_id可引用完整本人清单归档历史单，逐项核原日期/摘要/金额及归档序号，不绑定本案单号。预览不算正式打印或批准。",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -815,6 +1252,30 @@
             "default": false,
             "title": "Execute",
             "type": "boolean"
+          },
+          "resume_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Resume Job Id"
+          },
+          "source_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Job Id"
           }
         },
         "required": [
@@ -834,6 +1295,214 @@
       },
       "annotations": {
         "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "reimbursement_print_batch",
+      "description": "批量导出审批后的正式报销单。merge_pdf与finance_only独立；缺省读取本批配置，最终默认false/true。默认预览，执行返回job_id后查result；中断保留原任务。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "case_id": {
+            "title": "Case Id",
+            "type": "string"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          },
+          "merge_pdf": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Merge Pdf"
+          },
+          "finance_only": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Finance Only"
+          },
+          "output_root": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Output Root"
+          },
+          "sequences": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Sequences"
+          },
+          "execute": {
+            "default": false,
+            "title": "Execute",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "case_id",
+          "request_id"
+        ],
+        "title": "reimbursement_print_batchArguments"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "reimbursement_print_batchDictOutput",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "reimbursement_business",
+      "description": "固定HTTP：bills-list完整本人单据；approvals-list完整当前审批人清单（角色来自原生记录，不能推定权限）；bill-read读取基本/经费/支出/支付/审批/劳务/说明/预审/已归属票据；invoices-list读取日常票池，recognition-list读取识别明细，invoice-inventory完整读取两者用于上传后回读；upload-prepare核第一批真实原件但不上传；create-prepare核学校建单定义、模板及默认值，不创建；definitions核原生定义；basic/payments/notes/pre-review-prepare核本案原字段和变更计划，不保存；bills-export引用完整清单source_job_id导出原生EXCEL/PDF并逐单逐列核验，bills-export-recover引用原导出job只收取已生成文件；print-coverage核待投递覆盖；reference-bill-read凭同案完整本人清单source_job_id及reference_serial只读查历史单，不绑定本案或提供保存来源；domain=archive-summary保留七个完整摘要域，票据与分配另读；staff-lookup按staff_query教工号查询当前教师，不绑定单号、不保存。无点击、不审批。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "case_id": {
+            "title": "Case Id",
+            "type": "string"
+          },
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "tab_id": {
+            "title": "Tab Id",
+            "type": "string"
+          },
+          "expected_userid": {
+            "title": "Expected Userid",
+            "type": "string"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          },
+          "domain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Domain"
+          },
+          "source_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Job Id"
+          },
+          "print_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Print Job Id"
+          },
+          "reference_serial": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Reference Serial"
+          },
+          "staff_query": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Staff Query"
+          },
+          "notes_xtype": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Notes Xtype"
+          }
+        },
+        "required": [
+          "case_id",
+          "action",
+          "tab_id",
+          "expected_userid",
+          "request_id"
+        ],
+        "title": "reimbursement_businessArguments"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "reimbursement_businessDictOutput",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": true,
         "destructiveHint": false,
         "openWorldHint": false
       }
@@ -866,6 +1535,197 @@
       },
       "annotations": {
         "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "reimbursement_finance_feedback",
+      "description": "从同案完整bills-list回执获取财务挂单/审批退回原文；保留单号、状态、采集时间和来源SHA。历史意见默认分离，缺理由明确列出。读取不启动浏览器；execute仅在明确output_dir时生成全新HTML复制页、文本和Excel交付计划，不修改财务。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "case_id": {
+            "title": "Case Id",
+            "type": "string"
+          },
+          "source_job_id": {
+            "title": "Source Job Id",
+            "type": "string"
+          },
+          "serials": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Serials"
+          },
+          "include_history": {
+            "default": false,
+            "title": "Include History",
+            "type": "boolean"
+          },
+          "output_dir": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Output Dir"
+          },
+          "execute": {
+            "default": false,
+            "title": "Execute",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "case_id",
+          "source_job_id"
+        ],
+        "title": "reimbursement_finance_feedbackArguments"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "reimbursement_finance_feedbackDictOutput",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "reimbursement_intake_review",
+      "description": "查看成功归档的材料并登记人工核对。inspect分页返回材料ID/来源SHA/页数/票号候选；register须逐项类别、完整票号页码、核对依据和刚读取的revision。默认预览；execute只经update_case登记本案候选来源，不选票、不更改核定金额、不写财务。普通电子发票20位；其他票据保留专用流程。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "case_id": {
+            "title": "Case Id",
+            "type": "string"
+          },
+          "intake_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Intake Job Id"
+          },
+          "action": {
+            "default": "inspect",
+            "enum": [
+              "batches",
+              "inspect",
+              "preview",
+              "register"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "records": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Records"
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Revision"
+          },
+          "confirmation_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Confirmation Note"
+          },
+          "execute": {
+            "default": false,
+            "title": "Execute",
+            "type": "boolean"
+          },
+          "offset": {
+            "default": 0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "limit": {
+            "default": 50,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "material_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Material Id"
+          },
+          "page": {
+            "default": 1,
+            "title": "Page",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "case_id"
+        ],
+        "title": "reimbursement_intake_reviewArguments"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "reimbursement_intake_reviewDictOutput",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": false,
         "destructiveHint": false,
         "openWorldHint": false
       }
@@ -930,6 +1790,7 @@
           "topic": {
             "default": "start",
             "enum": [
+              "review",
               "quickstart",
               "start",
               "workflow",
@@ -945,6 +1806,9 @@
               "export",
               "windows",
               "ocr",
+              "remuneration",
+              "execution",
+              "business",
               "batch-workflow",
               "configuration",
               "security"
@@ -1172,6 +2036,18 @@
             ],
             "title": "Profile",
             "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Title"
           }
         },
         "required": [
@@ -1655,7 +2531,7 @@
     },
     {
       "name": "reimbursement_access",
-      "description": "财务检查与登录。new-interface须execute=true，可省略旧tab_id；silent默认true，不支持时不回退。明确silent=false允许原生短暂置前并恢复原标签。recover-interface只读同案原job/artifact，继承原开页模式，不重开。check-page需身份，diagnose只读错误页；不输出密码/Cookie。",
+      "description": "财务检查、登录和本案薪酬办理。full_control按授权定位财务页；new-interface可separate_window，restore-context恢复本案上下文。薪酬经SHA原件、人员查询、添加和独立清单回读后建单；添加及建单须来源job_id/artifact_id，确认只承接原pending，不重放。查guide(remuneration/execution)，仍不代其他角色审批或输入验证码。",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1690,11 +2566,40 @@
                 "enum": [
                   "check",
                   "check-page",
+                  "check-backend",
                   "diagnose",
                   "ensure",
                   "new-interface",
                   "recover-interface",
-                  "wake-interface"
+                  "wake-interface",
+                  "restore-context",
+                  "applicant-verification-open",
+                  "remuneration-activity-setup",
+                  "remuneration-add-person",
+                  "remuneration-basic-open",
+                  "remuneration-clear-length-rejection",
+                  "remuneration-close-person",
+                  "remuneration-confirm-added",
+                  "remuneration-confirm-create",
+                  "remuneration-create-claim",
+                  "remuneration-entry",
+                  "remuneration-expenses-open",
+                  "remuneration-funding-open",
+                  "remuneration-funding-other-add",
+                  "remuneration-funding-other-open",
+                  "remuneration-funding-other-select",
+                  "remuneration-funding-search",
+                  "remuneration-inspect",
+                  "remuneration-save",
+                  "remuneration-readback",
+                  "remuneration-recover",
+                  "remuneration-lookup-person",
+                  "remuneration-open-person",
+                  "remuneration-payment-close",
+                  "remuneration-payment-inspect",
+                  "remuneration-payments-open",
+                  "remuneration-student-category",
+                  "remuneration-teacher-lookup"
                 ],
                 "type": "string"
               },
@@ -1752,6 +2657,68 @@
             ],
             "default": null,
             "title": "Silent"
+          },
+          "separate_window": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Separate Window"
+          },
+          "student_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Student Id"
+          },
+          "query": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Query"
+          },
+          "plan": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Plan"
+          },
+          "authority": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Authority"
           },
           "session_only": {
             "anyOf": [
@@ -2251,7 +3218,7 @@
     },
     {
       "name": "reimbursement_invoice_retry",
-      "description": "异常票据先inspect及完整53/113查询，再preview冻结原件/原生目标/清理范围；来源引用同案source任务，或已登记且SHA核对的verification_manifest，无需已选票或建单。刷新、重识别、清理、确认须execute=true并引用同案预览SHA；refresh只触发原生查询，回执system_write=false。重识别及清理均分两步：confirm还需对应原动作回执和独立真实弹框检查。readback必须引用同计划成功动作receipt（cleanup/reidentify须confirm），53/113新查询均晚于动作回执和计划基线。recover只查原动作marker，不重放；原job为unknown/failed且无回执时可省artifact_id。全部走稳定job与日志，不接路径/JS/URL/前台参数，不释放他人预约或自动重传。",
+      "description": "异常票据固定HTTP：inspect完整读取本人53/113及动作定义；preview按同案原件SHA/票号/原生ID冻结范围。cleanup仅登记清理意图，不删除；新发inspect后confirm才一次删除明确异常记录。正常/已绑定/无错误记录受保护。readback引用原confirm或其原marker恢复及两个新完整查询，ack-write核目标消失和非目标ID保留后清pending；明确服务端拒绝须完整回读未变化才可not_applied。recover只读原marker，不重发。refresh为HTTP查询，system_write=false；单票重识别先核原生检查和源文件确认，再调用固定OCR接口一次，独立回读正常认证或needs_correction；处理中不解pending，不退回旧控件。不释放他人预约，不自动重传。",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -2570,7 +3537,7 @@
     },
     {
       "name": "reimbursement_invoice_selection",
-      "description": "独立选票，默认preview；同案来源/审核/快照/preview以job/artifact SHA引用。apply须具体授权及execute=true，只改原生勾选、不建单/提交/删除。缺selarrrow/身份/上下文、占用或购方审核失败不能新增；recover仅原marker不重发。",
+      "description": "完整HTTP票池+同案原件/票面审核冻结GUID选择。preview默认只读；apply须execute，仅原子保存本案manifest中的选择集，system_write=false，不改变页面勾选、不建单或提交。追加/替换/移除保留来源与审核SHA，抬头税号及已占用检查继续生效；已有单号不适用本入口。readback比较本地GUID集及新HTTP完整票池。recover按原job本地意图和前后SHA恢复，不覆盖其他编辑；旧控件预览不能派发。",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -2828,7 +3795,7 @@
     },
     {
       "name": "reimbursement_stage",
-      "description": "日常草稿的单阶段计划/执行，默认仅生成计划。execute=true需当前tab_id和本案授权。保存后独立回读；review止于本人审核。",
+      "description": "草稿单阶段计划/执行；basic/funding/expenses/payments/notes/pre-review走固定HTTP，各阶段范围见business指南。execute=true需当前tab_id和本案账号参数；单次保存后business bill-read独立回读，再record_result，不重放未知写入。真实变更保存尚待验收。",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -2840,6 +3807,7 @@
             "enum": [
               "basic",
               "funding",
+              "categories",
               "expenses",
               "payments",
               "notes",
@@ -2871,6 +3839,11 @@
             ],
             "default": null,
             "title": "Tab Id"
+          },
+          "noop_only": {
+            "default": false,
+            "title": "Noop Only",
+            "type": "boolean"
           }
         },
         "required": [
@@ -2894,7 +3867,7 @@
     },
     {
       "name": "reimbursement_invoice",
-      "description": "发票目录、上传、认证和建日常草稿。默认生成脚本；每批1至10票。未知创建不重放；resume-draft只接续本案最后一次独立回读并ack的明确拒绝，保留原意图。上传和认证后独立回读再登记。",
+      "description": "upload按来源SHA分块HTTP上传并一次保存，每批1至10份、每份≤5MiB。upload-resume只接原job及未发出的子阶段。upload-recognize引用原upload job，接续已保存PDF/OFD的原生识别，保留原pending；upload-recognize-resume引用原识别job，只发尚未准备的目标，未知请求不重发。随后business invoice-inventory完整独立回读及ack-write。create-draft核本案冻结选择、原件审核和学校分支后单次创建；完整GUID/金额回读后bind-serial。resume-draft只读原marker，不重建。未迁移写动作禁止点击回退。",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -2907,6 +3880,32 @@
               "open-pool",
               "open-upload",
               "upload",
+              "upload-resume",
+              "upload-release",
+              "upload-recognize",
+              "upload-recognize-resume",
+              "upload-recover-recognition",
+              "nonvat-inspect",
+              "nonvat-save",
+              "nonvat-readback",
+              "nonvat-recover",
+              "nonvat-select",
+              "allowance-inspect",
+              "allowance-prepare",
+              "allowance-create",
+              "allowance-readback",
+              "allowance-recover",
+              "draft-cancel-prepare",
+              "draft-cancel",
+              "draft-cancel-recover",
+              "domestic-allowance-inspect",
+              "domestic-travel-add-prepare",
+              "domestic-travel-add-save",
+              "domestic-travel-add-recover",
+              "domestic-allowance-edit-prepare",
+              "domestic-allowance-edit-save",
+              "domestic-allowance-edit-recover",
+              "domestic-allowance-finalize",
               "read",
               "save-upload",
               "create-draft",
@@ -2945,6 +3944,18 @@
             "default": 10,
             "title": "Count",
             "type": "integer"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Job Id"
           }
         },
         "required": [
@@ -2968,7 +3979,7 @@
     },
     {
       "name": "reimbursement_correction",
-      "description": "退回单逐票拆分。plan含原件SHA、GUID、人员、往返用途、经费和个人/团队限额；默认校验/生成计划。update/save后须独立回读、verify和ack-write。不重新生成审批流程。",
+      "description": "退回原单续编及逐票拆分。returned-*用空plan：prepare核本人拒绝原单；open引用prepare；学校明确确认后confirm引用原open；recover只读原marker。同号草稿独立回读后才更新本地流程标记，不新建、不审批。专项拆分plan含原件SHA、GUID、人员、往返用途、经费与限额，仍须独立verify/ack-write。",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -2979,6 +3990,8 @@
           "action": {
             "enum": [
               "check",
+              "inspect",
+              "recover",
               "verify",
               "apply",
               "begin",
@@ -2992,7 +4005,11 @@
               "basic-read",
               "basic-close",
               "drafts",
-              "resume"
+              "resume",
+              "returned-prepare",
+              "returned-open",
+              "returned-confirm",
+              "returned-recover"
             ],
             "title": "Action",
             "type": "string"
@@ -3084,8 +4101,57 @@
       }
     },
     {
+      "name": "reimbursement_applicant_batch",
+      "description": "既有单据的本人508节点批量同意。manifest须路径及SHA，逐单绑定输入和用户授权；保留短信停点、原pending、已完成跳过、独立回读和耗时。原request重连续办，不建单、不代其他角色审批或填验证码。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "case_id": {
+            "title": "Case Id",
+            "type": "string"
+          },
+          "manifest": {
+            "additionalProperties": true,
+            "title": "Manifest",
+            "type": "object"
+          },
+          "tab_id": {
+            "title": "Tab Id",
+            "type": "string"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          },
+          "execute": {
+            "default": false,
+            "title": "Execute",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "case_id",
+          "manifest",
+          "tab_id",
+          "request_id"
+        ],
+        "title": "reimbursement_applicant_batchArguments"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "reimbursement_applicant_batchDictOutput",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
       "name": "reimbursement_submission",
-      "description": "按本案明确授权逐步提交同号单据；每步独立回读。applicant-agree另须applicant_agreement_authorized、意见同意及当前账号，限申请人508节点；验证码留现场，不代领导审批或付款。",
+      "description": "inspect/options已接固定HTTP：完整合同/打印及其他辅助证据分组，保存后新的inspect再ack-write；无点击回退。其他流程写节点仍按迁移表核对。按本案明确授权逐步办理同号单据；applicant-agree另须applicant_agreement_authorized、意见同意及当前账号，限申请人508节点；验证码留现场，不代领导审批或付款。",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -3095,10 +4161,17 @@
           },
           "action": {
             "enum": [
+              "applicant-inspect",
+              "applicant-readback",
+              "applicant-recover",
+              "applicant-refresh",
+              "applicant-documents",
               "inspect",
               "status",
               "status-readback",
               "print-inspect",
+              "print-api-inspect",
+              "print-api-status",
               "template-inspect",
               "detail-open",
               "detail-continue",
@@ -3108,6 +4181,7 @@
               "system-print-open",
               "system-print-choice",
               "system-print-read",
+              "system-print-status",
               "system-print-dismiss",
               "applicant-open",
               "verification-cancel",
@@ -3118,7 +4192,12 @@
               "next",
               "promise",
               "department",
-              "applicant-agree"
+              "applicant-agree",
+              "workflow-inspect",
+              "applicant-prepare",
+              "workflow-readback",
+              "workflow-recover",
+              "options-recover"
             ],
             "title": "Action",
             "type": "string"
@@ -3148,6 +4227,30 @@
             ],
             "default": null,
             "title": "Tab Id"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Job Id"
+          },
+          "artifact_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Artifact Id"
           }
         },
         "required": [
@@ -3487,9 +4590,777 @@
         "destructiveHint": false,
         "openWorldHint": false
       }
+    },
+    {
+      "name": "reimbursement_task_view",
+      "description": "优先用此入口读取任务结论和可直接调用的下一步；最多等待原job 10秒，不重发。保留来源引用、完整性与未核状态，默认不回传大段原始JSON；完整依据按details_call读取。程序完成不冒称财务完成。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "case_id": {
+            "title": "Case Id",
+            "type": "string"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "wait_seconds": {
+            "default": 0,
+            "title": "Wait Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "case_id",
+          "job_id"
+        ],
+        "title": "reimbursement_task_viewArguments"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "reimbursement_task_viewDictOutput",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "reimbursement_case_details",
+      "description": "日常报销中文表单。inspect返回字段合同、已有值、全部显式缺项和revision；draft只暂存未确认填写；save须确认依据及原revision，复用update_case保存本地参数。不会填学校网页、创建单据或改变审批状态。个人收款仅姓名/学工号，银行卡由学校候选核实。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "case_id": {
+            "title": "Case Id",
+            "type": "string"
+          },
+          "action": {
+            "default": "inspect",
+            "enum": [
+              "inspect",
+              "draft",
+              "save"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "values": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Values"
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Revision"
+          },
+          "confirmation_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Confirmation Note"
+          },
+          "execute": {
+            "default": false,
+            "title": "Execute",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "case_id"
+        ],
+        "title": "reimbursement_case_detailsArguments"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "reimbursement_case_detailsDictOutput",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "reimbursement_case_journey",
+      "description": "按实际来源、票面核对、填写和原任务状态给出可执行下一步。inspect不会要求在建单前虚填单号；invoice返回本案SHA核实的原件核对信息。未知写入先回原任务。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "case_id": {
+            "title": "Case Id",
+            "type": "string"
+          },
+          "action": {
+            "default": "inspect",
+            "enum": [
+              "inspect",
+              "invoice"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Index"
+          }
+        },
+        "required": [
+          "case_id"
+        ],
+        "title": "reimbursement_case_journeyArguments"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "reimbursement_case_journeyDictOutput",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "reimbursement_finance_connection",
+      "description": "连接本人本机Edge账号，不接收密码或验证码。status/discover查连接；verify明确学工号、选中tab和request_id进行只读核验；原任务结束后accept原source_job_id得到connection_id；bills/approvals/history以新查询request_id分别读单据、待审批或历史清单。只有install_bridge需execute=true，登记当前Windows用户组件；不会写财务。无需先创建活动。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "default": "status",
+            "enum": [
+              "status",
+              "install_bridge",
+              "discover",
+              "verify",
+              "accept",
+              "bills",
+              "approvals",
+              "history"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "expected_userid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Userid"
+          },
+          "tab_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Tab Id"
+          },
+          "connection_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Connection Id"
+          },
+          "source_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Job Id"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Request Id"
+          },
+          "execute": {
+            "default": false,
+            "title": "Execute",
+            "type": "boolean"
+          }
+        },
+        "title": "reimbursement_finance_connectionArguments"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "reimbursement_finance_connectionDictOutput",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "reimbursement_material_requirements",
+      "description": "逐项显示当前材料规则、缺件和条件。context只登记有依据的已知布尔条件；acknowledge记录已查看差项以继续其他准备，所有缺件原样保留，绝不标记材料齐全。仅修改本地资料，须当前revision。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "case_id": {
+            "title": "Case Id",
+            "type": "string"
+          },
+          "action": {
+            "default": "inspect",
+            "enum": [
+              "inspect",
+              "context",
+              "acknowledge"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "values": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Values"
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Revision"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Note"
+          },
+          "execute": {
+            "default": false,
+            "title": "Execute",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "case_id"
+        ],
+        "title": "reimbursement_material_requirementsArguments"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "reimbursement_material_requirementsDictOutput",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "reimbursement_intake_groups",
+      "description": "多活动收件分组。先读取本案已成功归档的材料和目录候选；groups显式给title/profile/material_ids预览，核对范围后execute。每份材料只能归一个子活动；未分配保留原批次。沿冻结分组计划重连不重复建活动，不推定金额、票面通过或财务授权。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "case_id": {
+            "title": "Case Id",
+            "type": "string"
+          },
+          "intake_job_id": {
+            "title": "Intake Job Id",
+            "type": "string"
+          },
+          "groups": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Groups"
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Revision"
+          },
+          "execute": {
+            "default": false,
+            "title": "Execute",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "case_id",
+          "intake_job_id"
+        ],
+        "title": "reimbursement_intake_groupsArguments"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "reimbursement_intake_groupsDictOutput",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "reimbursement_receive_materials",
+      "description": "从明确选定的本机原文件/材料文件夹收件，包括桌面路径。预览冻结逐文件SHA，沿next_action确认后将校验副本送入资料区，再用原material_intake归档。原文件保留，不扩大其他工具权限。文件或目录内容改变须重新预览。目录仅为分组候选，金额另核。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "case_id": {
+            "title": "Case Id",
+            "type": "string"
+          },
+          "paths": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Paths",
+            "type": "array"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          },
+          "grouping": {
+            "default": "unassigned",
+            "enum": [
+              "unassigned",
+              "directories"
+            ],
+            "title": "Grouping",
+            "type": "string"
+          },
+          "execute": {
+            "default": false,
+            "title": "Execute",
+            "type": "boolean"
+          },
+          "source_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Sha256"
+          }
+        },
+        "required": [
+          "case_id",
+          "paths",
+          "request_id"
+        ],
+        "title": "reimbursement_receive_materialsArguments"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "reimbursement_receive_materialsDictOutput",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "reimbursement_case_finance",
+      "description": "本案财务向导。先inspect和bind已核本人连接；账号、tab和正式来源自动带入。原票audit、票池、选票预览/保存、建单/绑定仍是分开的步骤；fill_plan冻结完整填单范围，授权后fill_continue逐步接续原任务并独立回读，fill_pause暂停后续阶段。只用原job和next_action，不猜单号/重复建单，不模拟界面。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "case_id": {
+            "title": "Case Id",
+            "type": "string"
+          },
+          "action": {
+            "default": "inspect",
+            "enum": [
+              "inspect",
+              "bind",
+              "source_audit",
+              "pool",
+              "selection_preview",
+              "selection_apply",
+              "upload",
+              "create",
+              "bind_created",
+              "fill_plan",
+              "fill_continue",
+              "fill_pause",
+              "fill_status",
+              "fill_recover",
+              "ready_inspect",
+              "ready_plan",
+              "ready_continue",
+              "ready_status",
+              "ready_pause",
+              "ready_recover"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "connection_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Connection Id"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Job Id"
+          },
+          "invoice_numbers": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Invoice Numbers"
+          },
+          "start": {
+            "default": 0,
+            "title": "Start",
+            "type": "integer"
+          },
+          "count": {
+            "default": 1,
+            "title": "Count",
+            "type": "integer"
+          },
+          "plan_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Plan Id"
+          },
+          "authorization_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Authorization Note"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Request Id"
+          },
+          "execute": {
+            "default": false,
+            "title": "Execute",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "case_id"
+        ],
+        "title": "reimbursement_case_financeArguments"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "reimbursement_case_financeDictOutput",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "reimbursement_approver_batch",
+      "description": "按当前登录人的真实审批角色办理。list/status接续原批；inspect从本人收件箱完整待办列可选项；plan冻结所选项、角色、金额及逐字意见。run须明确本批授权和execute；verification只展示同项本人验证页，不读取验证码；resume沿原范围继续；pause只暂停后续项目；finalize只补已回读项目的文档；recover/reconcile只读原结果，不重发未知审批。每项独立核对日志及金额，步骤完成不等于整单审批或付款完成。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "default": "list",
+            "enum": [
+              "list",
+              "inspect",
+              "plan",
+              "status",
+              "run",
+              "resume",
+              "recover",
+              "reconcile",
+              "verification",
+              "pause",
+              "finalize"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "connection_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Connection Id"
+          },
+          "source_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Job Id"
+          },
+          "selected_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Selected Ids"
+          },
+          "decision": {
+            "default": "agree",
+            "enum": [
+              "agree",
+              "reject"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "opinion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Opinion"
+          },
+          "plan_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Plan Id"
+          },
+          "authorization_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Authorization Note"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Request Id"
+          },
+          "execute": {
+            "default": false,
+            "title": "Execute",
+            "type": "boolean"
+          }
+        },
+        "title": "reimbursement_approver_batchArguments"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "reimbursement_approver_batchDictOutput",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
     }
   ],
   "json_routes": {
+    "reimbursement_applicant_batch": {
+      "method": "applicant_batch"
+    },
+    "reimbursement_approver_batch": {
+      "method": "approver_batch"
+    },
+    "reimbursement_assist": {
+      "method": "assist"
+    },
     "reimbursement_audit_invoice_fields": {
       "method": "audit_invoice_fields"
     },
@@ -3499,8 +5370,26 @@
     "reimbursement_bridge": {
       "method": "bridge"
     },
+    "reimbursement_business": {
+      "method": "business"
+    },
     "reimbursement_capabilities": {
       "method": "capabilities"
+    },
+    "reimbursement_case_delivery": {
+      "method": "case_delivery"
+    },
+    "reimbursement_case_details": {
+      "method": "case_details"
+    },
+    "reimbursement_case_finance": {
+      "method": "case_finance"
+    },
+    "reimbursement_case_journey": {
+      "method": "case_journey"
+    },
+    "reimbursement_case_materials": {
+      "method": "case_materials"
     },
     "reimbursement_cases": {
       "method": "cases"
@@ -3508,8 +5397,20 @@
     "reimbursement_check": {
       "method": "check"
     },
+    "reimbursement_finance_connection": {
+      "method": "finance_connection"
+    },
+    "reimbursement_finance_feedback": {
+      "method": "finance_feedback"
+    },
     "reimbursement_guide": {
       "method": "guide"
+    },
+    "reimbursement_intake_groups": {
+      "method": "intake_groups"
+    },
+    "reimbursement_intake_review": {
+      "method": "intake_review"
     },
     "reimbursement_invoice_edit": {
       "method": "invoice_edit"
@@ -3541,6 +5442,12 @@
     "reimbursement_material_ocr_resume": {
       "method": "material_ocr_resume"
     },
+    "reimbursement_material_requirements": {
+      "method": "material_requirements"
+    },
+    "reimbursement_material_review": {
+      "method": "material_review"
+    },
     "reimbursement_new_case": {
       "method": "new_case"
     },
@@ -3562,8 +5469,14 @@
     "reimbursement_prepare_batch_file": {
       "method": "prepare_batch_file"
     },
+    "reimbursement_print_batch": {
+      "method": "print_batch"
+    },
     "reimbursement_read_taxi_itineraries": {
       "method": "read_taxi_itineraries"
+    },
+    "reimbursement_receive_materials": {
+      "method": "receive_materials"
     },
     "reimbursement_record_invoice_verification": {
       "method": "record_invoice_verification"
@@ -3586,6 +5499,9 @@
     "reimbursement_standards_change": {
       "method": "standards_change"
     },
+    "reimbursement_standards_import": {
+      "method": "standards_import"
+    },
     "reimbursement_standards_init": {
       "method": "standards_init"
     },
@@ -3594,6 +5510,9 @@
     },
     "reimbursement_standards_select": {
       "method": "standards_select"
+    },
+    "reimbursement_task_view": {
+      "method": "task_view"
     },
     "reimbursement_update_case": {
       "method": "update_case"

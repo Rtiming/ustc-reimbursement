@@ -327,6 +327,8 @@ def run_submissions(service, *, scenario, batch_index, authorization, tab_id=Non
     def checkpoint(row=None):
         report['submitted_count'] = sum(r.get('status') == 'submitted_verified' for r in report['results'])
         report['already_submitted_count'] = sum(r.get('status') == 'already_in_approval_verified' for r in report['results'])
+        report['already_approved_count'] = sum(r.get('status') == 'already_approved_ready_verified' for r in report['results'])
+        report['already_paid_count'] = sum(r.get('status') == 'already_paid_verified' for r in report['results'])
         report['held_count'] = sum(r.get('status','').startswith('held_') for r in report['results'])
         report['applicant_ready_count'] = sum(r.get('status') in ('applicant_ready_verified','already_applicant_ready_verified') for r in report['results'])
         atomic_json(report_path,report)

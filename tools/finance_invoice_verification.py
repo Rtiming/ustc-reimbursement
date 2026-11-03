@@ -1,6 +1,7 @@
 """静默读取学校当前发票池并逐票留证；失败不切前台，未命中不推定无效或未报过。"""
 from __future__ import annotations
 import argparse
+from contextlib import nullcontext
 import json
 import re
 import subprocess
@@ -234,6 +235,18 @@ def full_grid_script(grid, expected_userid):
 })()'''.replace('TARGET', json.dumps(grid)).replace('EXPECTED_USERID', json.dumps(expected_userid)).replace('__BOUNDED_NATIVE_SERIALIZER__', NATIVE_SERIALIZER_JS)
 
 
+
+def full_grid_http_script(grid, expected_userid, case_id='native-invoice-inventory'):
+    """兼容原完整表格消费者的数据外壳；明确不含DOM/选择/可见性证据。"""
+    if grid not in {'53','113','101'} or not isinstance(expected_userid,str) or not re.fullmatch(r'[A-Za-z0-9]{2,40}',expected_userid):
+        raise ValueError('固定HTTP清单只接受53/113/101及本次明确账号')
+    from finance_http import source
+    action={'53':'invoices-list','113':'recognition-list','101':'bills-list'}[grid]
+    contracts=json.loads((ROOT/'data/finance_business_contracts.json').read_text())['domains']
+    c={'case_id':case_id,'expected_userid':expected_userid,'action':action}
+    if grid!='101':c['contracts']=contracts['invoices'if grid=='53'else'recognition']
+    return '(async()=>{'+source('business')+"\nconst c="+json.dumps(c,ensure_ascii=False)+",r=await reimbursementBusinessApi(c);if(!r.ok||!r.complete)throw Error('HTTP_INVENTORY_INCOMPLETE');return {...r,mode:'native_http_full_grid',projid:'WF_YBX',identity:{userid:c.expected_userid},scopeComplete:true,scope:r.account_scope,display_evidence:false,grids:[{funcno:"+json.dumps(grid)+",records:r.total_records,rowCount:r.rows.length,rows:r.rows,complete:true,allRecordsVisible:false,loading:false,display_evidence:false}]};})()"
+
 def navigation(view, expected_userid=None):
     label = {'home': '返回首页', 'used': '已使用发票', 'recognition': '【点击查看明细】', 'pool': '返回', 'drafts':'草稿', 'in-progress':'审批中', 'awaiting-approval':'待我审批','all-bills':'全部报销单'}[view]
     if expected_userid is not None and (not isinstance(expected_userid, str) or not re.fullmatch(r'[A-Za-z0-9_.@-]{1,80}', expected_userid)):
@@ -322,7 +335,8 @@ def match_pool(numbers, receipts):
         if not data.get('ok'):
             raise ValueError('失败回执不能证明发票池范围：' + str(path))
         for grid in data.get('grids', []):
-            complete = bool(grid.get('allRecordsVisible', not grid.get('loading') and grid.get('rowCount') == grid.get('records')))
+            complete = (data.get('business_transport')=='native_http' and data.get('scopeComplete')is True and grid.get('complete')is True
+                        and len(grid.get('rows',[]))==grid.get('records') or bool(grid.get('allRecordsVisible', not grid.get('loading') and grid.get('rowCount') == grid.get('records'))))
             scopes.append(dict(receipt=str(Path(path).resolve()), grid=grid.get('funcno'),
                 records=grid.get('records'), row_count=grid.get('rowCount'), visible_grid_complete=complete))
             for row in grid.get('rows', []):
@@ -372,8 +386,10 @@ def main():
     sub=parser.add_subparsers(dest='command',required=True)
     for name in ['snapshot','full-grid','view','query-used','recover','refresh-pool']:
         cmd=sub.add_parser(name);cmd.add_argument('--tab-id',required=True);cmd.add_argument('--output',type=Path,required=True)
+        cmd.add_argument('--keep-internal-tab',action='store_true',help='仅Edge在后台时临时保持本财务标签，完成恢复原标签，不激活应用')
         if name=='full-grid':
             cmd.add_argument('--grid',required=True,choices=['53','113','101'])
+            cmd.add_argument('--case-id',default='native-invoice-inventory')
             cmd.add_argument('--expected-userid',required=True)
         if name=='view':
             cmd.add_argument('view',choices=['home','used','recognition','pool','drafts','in-progress','awaiting-approval','all-bills'])
@@ -391,6 +407,8 @@ def main():
         args.output.write_text(json.dumps(match_pool(numbers,args.receipts),ensure_ascii=False,indent=2)+'\n')
         return
     if not re.fullmatch(r'[0-9]+',args.tab_id):raise ValueError('tab-id须来自本次标准tabs/access回执')
+    from finance_session import quiet_tab_context
+    context=quiet_tab_context(args.tab_id,args.output.with_suffix('.tab-context.json')) if args.keep_internal_tab else nullcontext()
     if args.command=='recover':
         prior=json.loads(args.receipt.read_text(encoding='utf-8'))
         marker=prior.get('result',{}).get('result_marker')
@@ -401,8 +419,9 @@ def main():
         result=dict(receipt=str(args.receipt.resolve()),tab_id=args.tab_id,
             observed_at_utc=datetime.now(timezone.utc).isoformat(),system_write=False,reinjected=False)
         try:
-            with browser_lock():
-                raw=evaluate('document.getElementById('+json.dumps(marker)+')?.textContent || "missing"',args.tab_id)
+            with context:
+                with browser_lock():
+                    raw=evaluate('document.getElementById('+json.dumps(marker)+')?.textContent || "missing"',args.tab_id)
             result['marker_state']=raw if raw in ['pending','missing',''] else 'completed'
             if result['marker_state']=='completed':result['result']=json.loads(raw)
         except (RuntimeError,subprocess.TimeoutExpired) as exc:
@@ -412,10 +431,13 @@ def main():
         return
     script=args.output.with_suffix('.js')
     if script.exists():raise ValueError('查验脚本已存在，先检查旧操作回执')
-    source=SNAPSHOT if args.command=='snapshot' else full_grid_script(args.grid,args.expected_userid) if args.command=='full-grid' else REFRESH_POOL if args.command=='refresh-pool' else navigation(args.view,args.expected_userid) if args.command=='view' else used_query_script(json.loads(args.numbers.read_text(encoding='utf-8')))
+    source=SNAPSHOT if args.command=='snapshot' else full_grid_http_script(args.grid,args.expected_userid,args.case_id) if args.command=='full-grid' else REFRESH_POOL if args.command=='refresh-pool' else navigation(args.view,args.expected_userid) if args.command=='view' else used_query_script(json.loads(args.numbers.read_text(encoding='utf-8')))
     script.write_text(source,encoding='utf-8')
-    raise SystemExit(subprocess.run([sys.executable,str(ROOT/'tools/edge_runtime.py'),str(script),
-        '--tab-id',args.tab_id,'--output',str(args.output),'--quiet']).returncode)
+    from registered_page_owner import RegisteredPageOwner
+    RegisteredPageOwner.before_child_dispatch(args.tab_id)
+    with context:
+        raise SystemExit(subprocess.run([sys.executable,str(ROOT/'tools/edge_runtime.py'),str(script),
+            '--tab-id',args.tab_id,'--output',str(args.output),'--operation-kind','read','--quiet']).returncode)
 
 
 if __name__=='__main__':main()

@@ -15,6 +15,21 @@ sys.path.insert(0, str(ROOT / 'tools'))
 VENDOR_SHA256 = '675f6c1a1734847b4c430b0cde4f03bde6f6e85f4efa3fc26906075715a29f3c'
 
 
+def stream_sha256(stream):
+    """Python3.10仍是受支持运行环境；在适配层补齐3.11才有的流式哈希。"""
+    if callable(getattr(hashlib, 'file_digest', None)):
+        return hashlib.file_digest(stream, 'sha256').hexdigest()
+    digest = hashlib.sha256()
+    for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+        digest.update(chunk)
+    return digest.hexdigest()
+
+
+def path_sha256(path):
+    with Path(path).open('rb') as stream:
+        return stream_sha256(stream)
+
+
 def archive_core():
     path = ROOT / 'distribution/vendor/archive_file.py'
     raw = path.read_bytes()
@@ -22,8 +37,9 @@ def archive_core():
         raise ValueError('归档核心与冻结版本不符，停止执行')
     module = types.ModuleType('reimbursement_archive_core')
     module.__file__ = str(path)
-    # 不再二次读取源码或采用旁边的pyc；执行刚刚验SHA的同一字节。
     exec(compile(raw, str(path), 'exec'), module.__dict__)
+    if not callable(getattr(hashlib, 'file_digest', None)):
+        module.digest = path_sha256
     if os.name == 'nt':
         module.stable_copy = windows_stable_copy
     return module
@@ -41,9 +57,9 @@ def windows_stable_copy(source, target):
                 dst.flush()
                 os.fsync(dst.fileno())
             src.seek(0)
-            original_sha = hashlib.file_digest(src, 'sha256').hexdigest()
+            original_sha = stream_sha256(src)
         with target.open('rb') as copied:
-            if hashlib.file_digest(copied, 'sha256').hexdigest() != original_sha:
+            if stream_sha256(copied) != original_sha:
                 raise ValueError('归档字节与锁定原件不符')
         # open_source退出时继续核原生文件身份、时间及所有祖先路径，原件仍被保护。
     return original_sha

@@ -101,7 +101,7 @@ function harness(options={}) {
   await assert.rejects(a.call('page-read',{tab_id:'11',scope:'finance',source:'fixture',all_frames:true}),/invalid_evaluate/);
   assert.equal(a.state.scripts.length,oldReadCount+1);
   assert.equal((source.match(/chrome\.windows\.update/g)||[]).length,1);
-  assert(source.split('async function showVerification(args){')[1].split('async function createPage')[0].includes('chrome.windows.update'));
+  assert(source.split('async function showVerification(')[1].split('async function createPage')[0].includes('chrome.windows.update'));
   assert(!source.includes('document.cookie'));
   assert(!source.includes('onMessageExternal'));
   console.log('native bridge contract: fixed origins/tabs, silent switch, no URL override, expired request and production smoke guards passed');

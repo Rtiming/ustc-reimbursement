@@ -52,6 +52,8 @@ def main():
     ap.add_argument('--execute', action='store_true', help='在已登录macOS Edge实际执行')
     ap.add_argument('--tab-id', help='财务标签ID，多标签时明确选择')
     args = ap.parse_args()
+    if args.execute:
+        ap.error('native_http_adapter_required: 旧多阶段界面入口不再执行；使用统一stage入口及独立HTTP回读')
     c = (load_basic if args.steps == 'basic' else load_funding if args.steps == 'funding' else load)(args.case)
     stages = args.steps.split(',')
     if any(x not in STAGES for x in stages): ap.error('未知步骤')

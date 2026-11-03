@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""从本案候选生成来源清单并审核原生文字PDF；不搜索、解压、OCR或选票。"""
+"""从本案候选生成来源清单并审核原生文字PDF/OFD；不搜索、OCR或选票。"""
 from __future__ import annotations
 
 import argparse
@@ -263,6 +263,25 @@ def build_manifest(case, case_id, approved_roots, invoice_numbers=None):
             'source_chain_member_bytes_rechecked': False}
 
 
+def registration_input(manifest, case, approved_roots):
+    """正式来源清单转为原件登记输入；重新核对当前声明与字节，不沿用过期清单。"""
+    if not isinstance(manifest, dict) or manifest.get('schema') != SCHEMA:
+        raise ValueError('原件登记须使用正式候选来源清单')
+    current = build_manifest(case, manifest.get('case_id'), approved_roots, manifest.get('invoice_numbers_requested'))
+    if current != manifest:
+        raise ValueError('候选来源或原件字节已变，须重新核对来源清单')
+    rows = []
+    for source in manifest['original_files']:
+        numbers = source['invoice_number_candidates']
+        if len(numbers) != 1:
+            raise ValueError('原件登记要求一票一文件；请先核对并拆分多票原件，原始文件保留')
+        rows.append({'path': source['path'], 'sha256': source['sha256'],
+                     'invoice_number_candidates': numbers, 'issues': []})
+    return {'schema': 'ustc-verified-source-registration-v1', 'case_id': manifest['case_id'],
+            'records': rows, 'source_verified': True, 'invoice_face_audited': False,
+            'selection_write': False, 'system_write': False}
+
+
 def _write_bytes(data, output):
     _require_secure_io()
     output = _path(output, 'output')
@@ -355,8 +374,18 @@ def _audit_with_existing_evidence(manifest, case_id, roots, output, native_outpu
 
 
 def _native_pdf_preflight(path, pdftotext):
+    if path.suffix.lower()=='.ofd':
+        from scan_materials import extract_ofd
+        from zipfile import BadZipFile
+        from xml.etree.ElementTree import ParseError
+        try:pages=extract_ofd(path)
+        except (BadZipFile,ParseError,RuntimeError) as error:
+            raise ValueError('OFD结构不可读，须补原件或走已有远程识别流程：'+str(path)) from error
+        if not pages or any(p['method']!='ofd_text' or len(re.sub(r'\s','',p['text']))<15 for p in pages):
+            raise ValueError('OFD页缺少可核对原生文字，需补充识别证据：'+str(path))
+        return len(pages)
     if path.suffix.lower() != '.pdf':
-        raise ValueError(f'本地审核仅支持原生文字PDF，其他格式须走已有远程识别流程：{path}')
+        raise ValueError(f'本地审核仅支持原生文字PDF/OFD，其他格式须走已有远程识别流程：{path}')
     result = subprocess.run([str(pdftotext), '-layout', str(path), '-'],
                             capture_output=True, text=True, encoding='utf-8', timeout=45,
                             **({'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}))
@@ -402,7 +431,8 @@ def _check_audit_reports(native, manifest, page_counts):
             raise ValueError('既有审核报告页码不完整或重复：' + path)
         records = set()
         for page in pages:
-            if not isinstance(page, dict) or page.get('extraction_method') != 'pdf_text':
+            methods={'ofd_text','ofd_text_and_embedded_xml','ofd_semantic_tags_and_page_text','ofd_railway_text_and_embedded_xml'} if Path(path).suffix.lower()=='.ofd' else {'pdf_text'}
+            if not isinstance(page, dict) or page.get('extraction_method') not in methods:
                 raise ValueError('既有审核报告含非原生文字页，须走已有远程OCR流程：' + path)
             number_candidates = page.get('invoice_number_candidates')
             if number_candidates is None and page.get('kind') == 'fee_detail' and page.get('invoice_counted') is False:
@@ -535,7 +565,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
     for action, help_text in [('manifest', '核验本案声明候选并生成新来源清单'),
-                              ('audit', '审核本案原生文字PDF或已绑定的既有OCR与目视字段，固定USTC配置')]:
+                              ('audit', '审核本案原生文字PDF/OFD或已绑定的既有OCR与目视字段，固定USTC配置')]:
         command = commands.add_parser(action, help=help_text)
         command.add_argument('--case-file', type=Path, required=True)
         command.add_argument('--case-id', required=True)

@@ -26,3 +26,14 @@ OCR模型未随源码再分发，显式安装后对固定模型逐文件验证SH
 `distribution/vendor/archive_file.py`是维护者自有共享归档程序的未修改快照，已在本项目公开授权范围内纳入AGPL-3.0-or-later；原来源、提交和SHA见`distribution/dependencies.json`。浏览器扩展manifest中的key是扩展标识用的公开密钥，不是账户私钥。
 
 学校名称、网站、商标、表单与制度不因本仓库开源而转让或被重新许可。财务网站的使用权限和本单位有效规则由使用者自行取得。
+
+
+## Native spreadsheet export additions
+
+The material workflow also uses the following pinned packages; their original licenses remain with their installed distributions and offline wheels.
+
+| Package | Version | License |
+|---|---|---|
+| xlrd | 2.0.2 | BSD-3-Clause |
+| openpyxl | 3.1.5 | MIT |
+| et-xmlfile | 2.0.0 | MIT |

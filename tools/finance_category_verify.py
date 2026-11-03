@@ -5,7 +5,7 @@ import re
 from decimal import Decimal
 
 
-_CONTROL = re.compile(r"^pageOpen_v1\('发票信息','(.+?)!P![^&']*&([^&']+)&([^&']+)&([^']+)'\)$")
+_CONTROL = re.compile(r"^pageOpen_v1\('发票信息','(.+?)!P!([^&']*)&([^&']+)&([^&']+)&([^']+)'\)$")
 
 
 def category_rows(frame):
@@ -16,17 +16,21 @@ def category_rows(frame):
         match = _CONTROL.fullmatch(control.get('onclick', ''))
         if not match:
             continue
-        group, subject, project, budget = (v.strip() for v in match.groups())
-        matches = [row for row in rows if row[1] == control.get('text', '').strip()
+        group, subgroup, subject, project, budget = (v.strip() for v in match.groups())
+        native_row=control.get('row_cells')
+        if native_row is not None and (native_row not in rows or len(native_row)!=5):
+            raise ValueError('原生控件所属行未完整采集')
+        candidates=[native_row] if native_row is not None else rows
+        matches = [row for row in candidates if row[1] == control.get('text', '').strip()
                    and re.match(re.escape(group) + r'(?:\s|,|，|$)', row[0]) and row[2].startswith(project + '/')
                    and re.fullmatch(r'[\d,]+\.\d{2}', row[4])]
         if len(matches) != 1:
             raise ValueError('报销项不能唯一对应原生费用行：' + group)
         row = matches[0]
-        result.append({'group': group, 'subject': subject, 'subject_name': row[1],
+        result.append({'group': group, 'group_key':group+'!P!'+subgroup, 'subject': subject, 'subject_name': row[1],
                        'project': project, 'budget': budget,
                        'amount': str(Decimal(row[4].replace(',', ''))), 'invoice_content': row[0]})
-    if len({r['group'] for r in result}) != len(result):
+    if len({r['group_key'] for r in result}) != len(result):
         raise ValueError('原生报销项分组重复，不能按整组核对')
     return result
 
@@ -39,7 +43,7 @@ def verify_categories(form, frame):
     actual = category_rows(frame)
     funding = {f['code'] for f in form['funding']}
     for plan in plans:
-        hits = [r for r in actual if r['group'] == plan['group']]
+        hits = [r for r in actual if r['group'] == plan['group'] and (not plan.get('group_key') or r['group_key']==plan['group_key'])]
         if len(hits) != 1:
             raise ValueError('分类保存后缺少唯一原生分组：' + plan['group'])
         row = hits[0]
@@ -54,10 +58,10 @@ def review_material_prompt(form, frame, gaps):
     if not gaps:
         return {'state': 'no_material_prompt', 'review_required': False}
     rows = category_rows(frame)
-    planned = {p['group'] for p in form.get('expense_categories', [])}
+    planned = form.get('expense_categories', [])
     if planned:
         verify_categories(form, frame)
-    unchecked = [r for r in rows if r['group'] not in planned]
+    unchecked = [r for r in rows if not any(p['group']==r['group'] and (not p.get('group_key') or p['group_key']==r['group_key']) for p in planned)]
     required = bool(unchecked) or not rows
     return {'state': 'category_review_required' if required else 'category_verified_materials_still_required',
             'review_required': required, 'categories': rows, 'unchecked_groups': unchecked,

@@ -201,32 +201,8 @@ def _reduction_rows(request, observed):
     return rows
 
 
-def prepare_reduction(request, receipt, source, invoice_claims):
-    """只读冻结完整逐票减报候选；不产生保存脚本、授权或持久化成功结论。
-
-    invoice_claims须列出本窗口全部票，逐项含GUID、完整票号、票面、实报、
-    amount_origin与source_refs。来源只校验已给定文件SHA，不从文件名猜金额。
-    """
-    validate_source(request)
-    source = _source_ref(source)
-    observed = _body(receipt)
-    if json.loads(Path(source['path']).read_text()) != receipt:
-        raise ValueError('检查内容与已校SHA的来源回执不同')
-    window = observed.get('window', {})
-    if (not same_target(request, observed) or observed.get('capture_complete') is not True
-            or observed.get('native_node') != '' or window.get('owner_page') != 'WF_YBX_392'
-            or window.get('winno') != '282' or window.get('visible') is not True
-            or window.get('xtype') != request['entry']['parameters']):
-        raise ValueError('准备须有同案同账号同单号同标签同分组的完整282独立检查')
-    markers = [m for m in observed.get('markers', []) if m.get('marker', {}).get('request_digest') == digest(request)]
-    if (len(markers) != 1 or receipt.get('tab_id') != request['tab_id']
-            or not re.fullmatch(r'reimbursement-result-[a-f0-9]{32}', str(receipt.get('result_marker', '')))):
-        raise ValueError('准备须保留唯一原打开意图及同标签独立检查标记')
-    save_definition = _save_definition(observed)
-    rows = _reduction_rows(request, observed)
-    if (observed.get('entries') != [request['entry']]
-            or sum((_amount(r['current_amount']) for r in rows), Decimal(0)) != _amount(request['entry']['amount'], native=True)):
-        raise ValueError('390逐票当前金额与冻结的原生分组金额不闭合')
+def _verified_reduction_claims(rows, invoice_claims):
+    """同一逐票来源/减报算法，供原生窗口及HTTP读取各自的行合同调用。"""
     if not isinstance(invoice_claims, list) or len(invoice_claims) != len(rows):
         raise ValueError('须显式列出窗口全部票，其他票不得省略或推定不变')
     claims = {}
@@ -254,6 +230,76 @@ def prepare_reduction(request, receipt, source, invoice_claims):
             _source_ref(ref)
         row.update(claim_amount=f'{amount:.2f}', change_amount=f'{current-amount:.2f}',
                    changed=amount != current, amount_origin=origin, source_refs=refs)
+    return rows
+
+
+def prepare_http_reduction(request, receipt, source, invoice_claims):
+    """不制造窗口/控件元数据；只领用完整HTTP初始化后逐票结果及明确来源。"""
+    validate(request);source=_source_ref(source)
+    if json.loads(Path(source['path']).read_text())!=receipt:raise ValueError('HTTP减报来源SHA与内容不同')
+    body=receipt.get('result',{})
+    if(receipt.get('phase')!='script_completed'or receipt.get('tab_id')!=request['tab_id']or body.get('ok')is not True or
+       body.get('complete')is not True or body.get('action')!='amount-inspect'or body.get('business_transport')!='native_http'or
+       body.get('system_write')is not False or body.get('amount_rows_complete')is not True or
+       any(body.get(k)!=request[k]for k in ['case_id','serial','expected_userid'])or
+       body.get('entry',{}).get('group')!=request['group']or body['entry'].get('subject')!=request['subject']):
+        raise ValueError('须完整同分组本人HTTP逐票金额读取')
+    original=body.get('rows');rows=[]
+    if not isinstance(original,list)or not 1<=len(original)<=100:raise ValueError('HTTP金额行数未知或超出预算')
+    for index,row in enumerate(original):
+        if not isinstance(row,dict)or set(row)!={name.replace('-','.',1)for name in ROW_FIELDS}:raise ValueError('HTTP金额原生字段缺失或未知')
+        guid,number,ordinal=row.get('t.tk_guid'),re.findall(r'(?<![0-9])[0-9]{20}(?![0-9])',str(row.get('t.t_desc',''))),row.get('t.ord')
+        if row.get('t.serial_no')!=request['serial']or not re.fullmatch(r'[A-Fa-f0-9]{32}',str(guid))or len(number)!=1 or not re.fullmatch(r'[0-9]+',str(ordinal)):raise ValueError('HTTP金额逐票身份不完整')
+        face,current=_amount(row['t.invoice_amt'],native=True),_amount(row['t.t_amt'],native=True)
+        if face<=0 or not 0<=current<=face or _amount(row['t.invoice_amt_xs'],native=True)!=face:raise ValueError('HTTP票面/当前金额矛盾')
+        rows.append({'index':index,'invoice_guid':guid,'invoice_number':number[0],'face_amount':f'{face:.2f}',
+                     'current_amount':f'{current:.2f}','ord':ordinal,'serial':request['serial'],'native_fields':dict(row)})
+    if len({r['invoice_guid'].lower()for r in rows})!=len(rows)or len({r['invoice_number']for r in rows})!=len(rows):raise ValueError('HTTP金额GUID或票号重复')
+    row_total=sum((_amount(r['current_amount'])for r in rows),Decimal(0))
+    if body.get('editor_scope')=='whole_bill':
+        owned=body.get('owned_invoice_rows',[])
+        if row_total!=_amount(body['bill']['t.total_amt'],native=True) or len(owned)!=len(rows):raise ValueError('整单编辑金额或票据范围不完整')
+        for row in rows:
+            matches=[r for r in owned if r.get('t.tk_guid')==row['invoice_guid']]
+            if(len(matches)!=1 or matches[0].get('t.serial_no')!=request['serial'] or row['invoice_number']not in str(matches[0].get('t.tk_code_abst',''))
+               or _amount(matches[0]['t.tk_total_amt'],native=True)!=_amount(row['face_amount'])):raise ValueError('整单编辑的完整票据归属不符')
+    elif row_total!=_amount(body['entry']['amount'],native=True):raise ValueError('HTTP完整逐票金额与分组总额不闭合')
+    rows=_verified_reduction_claims(rows,invoice_claims)
+    return {'schema':'ustc-native-invoice-reduction-preparation-v1','request':request,'source':source,'rows':rows,
+            'current_total':f'{sum((_amount(r["current_amount"])for r in rows),Decimal(0)):.2f}',
+            'claim_total':f'{sum((_amount(r["claim_amount"])for r in rows),Decimal(0)):.2f}',
+            'change_total':f'{sum((_amount(r["change_amount"])for r in rows),Decimal(0)):.2f}',
+            'changed_invoice_guids':[r['invoice_guid']for r in rows if r['changed']],
+            'change_required':any(r['changed']for r in rows),'system_write':False,'financial_amount_verified':False}
+
+
+def prepare_reduction(request, receipt, source, invoice_claims):
+    """只读冻结完整逐票减报候选；不产生保存脚本、授权或持久化成功结论。
+
+    invoice_claims须列出本窗口全部票，逐项含GUID、完整票号、票面、实报、
+    amount_origin与source_refs。来源只校验已给定文件SHA，不从文件名猜金额。
+    """
+    validate_source(request)
+    source = _source_ref(source)
+    observed = _body(receipt)
+    if json.loads(Path(source['path']).read_text()) != receipt:
+        raise ValueError('检查内容与已校SHA的来源回执不同')
+    window = observed.get('window', {})
+    if (not same_target(request, observed) or observed.get('capture_complete') is not True
+            or observed.get('native_node') != '' or window.get('owner_page') != 'WF_YBX_392'
+            or window.get('winno') != '282' or window.get('visible') is not True
+            or window.get('xtype') != request['entry']['parameters']):
+        raise ValueError('准备须有同案同账号同单号同标签同分组的完整282独立检查')
+    markers = [m for m in observed.get('markers', []) if m.get('marker', {}).get('request_digest') == digest(request)]
+    if (len(markers) != 1 or receipt.get('tab_id') != request['tab_id']
+            or not re.fullmatch(r'reimbursement-result-[a-f0-9]{32}', str(receipt.get('result_marker', '')))):
+        raise ValueError('准备须保留唯一原打开意图及同标签独立检查标记')
+    save_definition = _save_definition(observed)
+    rows = _reduction_rows(request, observed)
+    if (observed.get('entries') != [request['entry']]
+            or sum((_amount(r['current_amount']) for r in rows), Decimal(0)) != _amount(request['entry']['amount'], native=True)):
+        raise ValueError('390逐票当前金额与冻结的原生分组金额不闭合')
+    rows = _verified_reduction_claims(rows, invoice_claims)
     reasons = []
     branch = observed.get('branch', {})
     raw = branch.get('tksbcodecnt')
@@ -433,19 +479,27 @@ def verify_case_reductions(service, case_id, form, manifest, expenses, invoices,
         _, saved, save_job = service._typed_case_artifact(case_id, ref['save_job_id'], ref['save_artifact_id'], 'expense_amount', ['save'])
         _, rows, _ = service._typed_case_artifact(case_id, ref['rows_job_id'], ref['rows_artifact_id'], 'expense_amount', ['inspect'])
         save_folder = service.job_folder(case_id, ref['save_job_id']); row_folder = service.job_folder(case_id, ref['rows_job_id'])
-        request = json.loads((save_folder/'expense_amount_request.json').read_text())
-        preparation = json.loads((save_folder/'expense_amount_reduction.json').read_text())
-        validate_reduction_plan(request, preparation)
-        action = saved.get('result', {})
-        if (save_job.get('execute') is not True or saved.get('phase') != 'script_completed' or action.get('ok') is not True
-                or action.get('amount_save_requested') is not True or action.get('request_digest') != digest(request)
-                or action.get('plan_digest') != digest(preparation) or action.get('serial') != form['serial']
-                or request['case_id'] != case_id or request['serial'] != form['serial']
-                or saved.get('browser_transport') != rows.get('browser_transport')
-                or rows.get('created_at_utc','') <= saved.get('executed_at_utc','')):
-            raise ValueError('须为本单真实保存之后的独立逐票持久回读')
-        row_request = json.loads((row_folder/'expense_amount_request.json').read_text())
-        proof = verify_saved_rows(row_request, rows, preparation)
+        if (save_folder/'native-amount-input.json').is_file():
+            from finance_native_amount import verify_ack as native_verify
+            ack_path=save_folder/'operator_readback_ack.json';ack=json.loads(ack_path.read_text())
+            if ack.get('status')!='operator_readback_recorded'or ack.get('outcome')!='saved'or save_job.get('execute')is not True:
+                raise ValueError('HTTP减报须已登记原saved ACK')
+            proof=native_verify(ack,rows,'saved')
+            if proof.get('financial_amount_verified')is not True:raise ValueError('HTTP逐票持久金额未验证')
+        else:
+            request = json.loads((save_folder/'expense_amount_request.json').read_text())
+            preparation = json.loads((save_folder/'expense_amount_reduction.json').read_text())
+            validate_reduction_plan(request, preparation)
+            action = saved.get('result', {})
+            if (save_job.get('execute') is not True or saved.get('phase') != 'script_completed' or action.get('ok') is not True
+                    or action.get('amount_save_requested') is not True or action.get('request_digest') != digest(request)
+                    or action.get('plan_digest') != digest(preparation) or action.get('serial') != form['serial']
+                    or request['case_id'] != case_id or request['serial'] != form['serial']
+                    or saved.get('browser_transport') != rows.get('browser_transport')
+                    or rows.get('created_at_utc','') <= saved.get('executed_at_utc','')):
+                raise ValueError('须为本单真实保存之后的独立逐票持久回读')
+            row_request = json.loads((row_folder/'expense_amount_request.json').read_text())
+            proof = verify_saved_rows(row_request, rows, preparation)
         for row in proof['rows']:
             number = row['invoice_number']; wanted = expected.get(number); selected_row = selected_by_number.get(number)
             if (number in verified or not wanted or not selected_row or row['invoice_guid'] != selected_row['guid']

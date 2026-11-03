@@ -2,12 +2,12 @@
   "schema": "ustc-distribution-dependencies-v1",
   "archive_helper": {
     "path": "tools/material_archive.py",
-    "sha256": "245da37f5b17a43cd8d6f7aa83ea1412c783adc9608bc769984e3ac7fb1ecd27",
+    "sha256": "e37dce7dd48711ff2eac09c2e4d931be9229630cc44936aabbd1153b18cff7a8",
     "source_owner": "project material archive adapter",
     "snapshot_date": "2026-10-25",
-    "python_min": "3.11",
+    "python_min": "3.10",
     "license": "AGPL-3.0-or-later",
-    "delegates_to": "vendor_snapshot; Windows source IO uses tools/windows_source_io.py"
+    "delegates_to": "vendor_snapshot; Python3.10 stream hashing and Windows source IO are provided by tools/material_archive.py"
   },
   "vendor_snapshot": {
     "path": "distribution/vendor/archive_file.py",

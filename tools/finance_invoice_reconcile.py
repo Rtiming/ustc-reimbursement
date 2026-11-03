@@ -57,19 +57,21 @@ def grid_scope(receipt, number, expected_userid):
     if not isinstance(rows, list) or any(not isinstance(r, dict) for r in rows):
         raise ValueError('原生行须为对象数组')
     reasons = []
+    native = (body.get('business_transport') == 'native_http'
+              and body.get('mode') in {'native_http_full_grid', 'native_http_invoice_retry_inspect'})
     checks = {
         'receipt_ok': body.get('ok') is True,
         'scope_complete': body.get('scopeComplete') is True,
-        'core_capture_complete': body.get('serialization', {}).get('coreCaptureComplete') is True,
-        'view_restored': body.get('pagination', {}).get('viewRestored') is True,
-        'grid_complete': grid.get('allRecordsVisible') is True,
+        'core_capture_complete': body.get('complete') is True if native else body.get('serialization', {}).get('coreCaptureComplete') is True,
+        'view_restored': body.get('page_context_modified') is False if native else body.get('pagination', {}).get('viewRestored') is True,
+        'grid_complete': grid.get('complete') is True if native else grid.get('allRecordsVisible') is True,
         'not_loading': grid.get('loading') is False,
         'consistent_count': type(grid.get('records')) is int and type(grid.get('rowCount')) is int and grid.get('records') == len(rows) == grid.get('rowCount'),
         'bounded_count': type(grid.get('records')) is int and 0 <= grid.get('records') <= 5000,
     }
     reasons.extend(key for key, passed in checks.items() if not passed)
     return body, grid, {'grid': number, 'complete': not reasons, 'checks': checks,
-        'incomplete_reasons': reasons, 'identity': body['identity'], 'observed_at': body.get('observedAt'),
+        'incomplete_reasons': reasons, 'identity': body['identity'], 'observed_at': body.get('observed_at') if native else body.get('observedAt'),
         'records': grid.get('records'), 'observed_rows': len(rows),
         'scope': '当前登录人、原回执查询条件下可见的指定表；不含其他账号或全校查重证明'}
 

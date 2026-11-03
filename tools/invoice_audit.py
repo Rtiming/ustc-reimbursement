@@ -4,6 +4,8 @@ import hashlib
 import json
 import re
 import unicodedata
+import zipfile
+from xml.etree import ElementTree
 from datetime import date
 from pathlib import Path
 from decimal import Decimal
@@ -134,6 +136,13 @@ def aviation_fields(text):
                 components=dict(zip(['fare','fuel_fee','vat','civil_aviation_fund','total'],values))
                 components['other_taxes']=None
                 break
+    if components is None:
+        # 扫描票OCR常把表头和值逐格分行；只在完整航空金额表内按原有列序取值。
+        start=text.find('票价');end=text.find('电子客票号码',start)
+        section=text[start:end] if start>=0 and end>start else ''
+        if all(label in normalize(section) for label in ['票价','燃油附加费','增值税税额','民航发展基金','其他税费','合计']):
+            values=re.findall(r'CNY\s*(\d+\.\d{2})(?!\d)',section)
+            if len(values)==6:components=dict(zip(['fare','fuel_fee','vat','civil_aviation_fund','other_taxes','total'],values))
     issued_iso=None
     if issued:
         try:issued_iso=date(*map(int,issued.groups())).isoformat()
@@ -151,7 +160,8 @@ def fields_from_page(text, page=1, expected_title=None, expected_tax_id=None):
     text = unicodedata.normalize('NFKC', text)
     tight = normalize(text)
     fiscal = '医疗门诊收费票据' in tight
-    aviation = '航空运输电子客票行程单' in tight
+    aviation = ('航空运输电子客票行程单' in tight or
+        all(label in tight for label in ['旅客姓名','电子客票号码','民航发展基金','填开单位','填开日期','购买方名称']) and 'CNY' in tight)
     railway = '铁路电子客票' in tight
     if '医疗收费明细' in tight and not fiscal: return {'page':page,'kind':'fee_detail','invoice_counted':False}
     identity_candidates = candidates([{'text':text,'method':'pdf_text','mean_confidence':None}],True)
@@ -198,6 +208,7 @@ def fields_from_page(text, page=1, expected_title=None, expected_tax_id=None):
     air=aviation_fields(text) if aviation else {}
     if aviation:
         buyer,buyer_id,seller,issued,total=air['buyer_title'],air['buyer_tax_id'],air['seller_title'],air['issue_date'],air['total_amount']
+        tax_amount=(air.get('aviation_components') or {}).get('vat')
     if railway:
         rail=railway_fields(text)
         buyer,buyer_id,total=rail['buyer_title'],rail['buyer_tax_id'],rail['total_amount']
@@ -240,6 +251,170 @@ def fields_from_page(text, page=1, expected_title=None, expected_tax_id=None):
             'amount_candidates':amounts,'amount_extraction':amount_extraction,'invoice_counted':kind!='unrecognized',**{k:v for k,v in air.items() if k in ['aviation_components','printed_invoice_status']}}
 
 
+def ofd_airline_fields(path, pages, expected_title=None, expected_tax_id=None):
+    """航空OFD的字段标签可能是矢量字形；用内嵌XBRL与真实页文字逐项互证。"""
+    payloads=[]
+    with zipfile.ZipFile(path) as archive:
+        members=archive.infolist()
+        if len(members)>512 or len({x.filename for x in members})!=len(members):
+            raise ValueError('OFD成员过多或存在重名，不能唯一审核')
+        for member in members:
+            if not re.fullmatch(r'Doc_\d+/Attachs/[^/]+\.xml',member.filename):continue
+            if member.file_size>2*1024*1024:raise ValueError('OFD内嵌XML过大')
+            raw=archive.read(member)
+            if b'<!DOCTYPE' in raw.upper() or b'<!ENTITY' in raw.upper():raise ValueError('OFD XML不接受实体声明')
+            root=ElementTree.fromstring(raw)
+            if any(e.tag.rsplit('}',1)[-1]=='ElectronicInvoiceAirTransportReceiptNumber' for e in root.iter()):
+                payloads.append((member.filename,raw,root))
+    if not payloads:return None
+    if len(payloads)!=1 or len(pages)!=1:raise ValueError('航空OFD须唯一内嵌票据且仅一页，其他版式待核')
+    member,raw,root=payloads[0]
+    def field(name):
+        found=[(e.text or '').strip() for e in root.iter() if e.tag.rsplit('}',1)[-1]==name]
+        if len(found)!=1 or not found[0]:raise ValueError('航空OFD字段缺失或不唯一：'+name)
+        return found[0]
+    number=field('ElectronicInvoiceAirTransportReceiptNumber')
+    if not re.fullmatch(r'[0-9]{20}',number):raise ValueError('航空OFD票号不是完整20位号码')
+    if field('measure')!='iso4217:CNY' or field('IssuingStatus')!='正常':
+        raise ValueError('航空OFD币种或开票状态不属于当前已支持范围')
+    issued=date.fromisoformat(field('IssueDate'))
+    buyer,buyer_id,passenger=field('NameOfPurchaser'),field('UnifiedSocialCreditCodeOfPurchaser'),field('PassengerName')
+    names={'fare':'Fare','fuel_fee':'FuelSurcharge','vat':'VatTaxAmount',
+           'civil_aviation_fund':'CivilAviationDevelopmentFund','other_taxes':'OtherTaxes','total':'TotalAmount'}
+    components={}
+    for key,tag in names.items():
+        value=field(tag)
+        if not re.fullmatch(r'[0-9]+(?:\.[0-9]{1,2})?',value):raise ValueError('航空OFD金额格式错误：'+tag)
+        components[key]=f'{Decimal(value):.2f}'
+    if sum(Decimal(v) for k,v in components.items() if k!='total')!=Decimal(components['total']):
+        raise ValueError('航空OFD分项合计与总额不符')
+    text=normalize(pages[0]['text'])
+    values=[number,buyer,buyer_id,passenger]+['CNY'+v for v in components.values()]
+    if any(normalize(v) not in text for v in values):raise ValueError('航空OFD内嵌字段与页面文字不一致')
+    printed_dates={f'{issued.year}年{m}月{d}日' for m in [str(issued.month),f'{issued.month:02d}'] for d in [str(issued.day),f'{issued.day:02d}']}
+    if not any(v in text for v in printed_dates|{issued.isoformat()}):raise ValueError('航空OFD开票日期未获页面文字支持')
+    validation={'profile_source':USTC['source'] if expected_title==USTC['title'] and expected_tax_id==USTC['tax_id'] else None,
+        'buyer_tax_id':check_tax_id(buyer_id),'seller_tax_id':check_tax_id(None),
+        'title_matches_expected':normalize(buyer)==normalize(expected_title) if expected_title else None,
+        'tax_id_matches_expected':normalize(buyer_id)==normalize(expected_tax_id) if expected_tax_id else None}
+    issues=['AVIATION_QUERY_AMOUNT_RULE_NEEDS_REVIEW']
+    if validation['title_matches_expected'] is False or validation['tax_id_matches_expected'] is False:issues.append('EXPECTED_BUYER_MISMATCH')
+    if validation['buyer_tax_id']['status'] in ['invalid_format','checksum_failed']:issues.append('BUYER_TAX_ID_INVALID')
+    return {'page':1,'kind':'aviation_vat','invoice_number_candidates':[number],'referenced_invoice_numbers':[],
+        'issue_date':issued.isoformat(),'total_amount':components['total'],'net_amount':None,'tax_amount':components['vat'],
+        'buyer_title':buyer,'buyer_tax_id':buyer_id,'seller_title':field('NameOfSeller'),'seller_tax_id':None,
+        'payer_name':passenger,'aviation_components':components,'printed_invoice_status':'正常',
+        'validation':validation,'issues':issues,'invoice_counted':True,'extraction_method':'ofd_text_and_embedded_xml',
+        'embedded_xml':{'member':member,'sha256':hashlib.sha256(raw).hexdigest(),'page_text_verified':True},
+        'native_airline_fields':{k:field(k) for k in ['PassengerName','CarrierDate','DepartureStation','DestinationStation','Flight','Class','ETicketNumber']},
+        'verification':{'platform':'national_tax','official_url':TAX_URL,'status':'not_queried','authenticity_verified':False,
+            'captcha_or_owner_interaction_required':True,'fields':{'invoice_number':number,'issue_date':issued.isoformat(),
+                'invoice_code':None,'total_amount':components['total'],'net_amount':None,'check_code':None},
+            'amount_note':'航空票分项据原生XML登记；官网开具金额口径另核，不将含民航基金的合计冒充不含税开具金额。'}}
+
+
+def ofd_railway_fields(path,pages,expected_title=None,expected_tax_id=None):
+    payloads=[]
+    with zipfile.ZipFile(path)as archive:
+        members=archive.infolist()
+        if len(members)>512 or len({x.filename for x in members})!=len(members):raise ValueError('OFD成员过多或重名')
+        for item in members:
+            if not re.fullmatch(r'Doc_\d+/Attachs/[^/]+\.xml',item.filename):continue
+            if item.file_size>2*1024*1024:raise ValueError('OFD票据XML过大')
+            raw=archive.read(item)
+            if b'<!DOCTYPE'in raw.upper()or b'<!ENTITY'in raw.upper():raise ValueError('OFD XML不接受实体')
+            root=ElementTree.fromstring(raw)
+            if any(e.tag.rsplit('}',1)[-1]=='ElectronicInvoiceRailwayETicketNumber'for e in root.iter()):payloads.append((item.filename,raw,root))
+    if not payloads:return None
+    if len(payloads)!=1 or len(pages)!=1:raise ValueError('铁路OFD须单页唯一内嵌票据')
+    member,raw,root=payloads[0]
+    def field(name,optional=False):
+        found=[(e.text or '').strip()for e in root.iter()if e.tag.rsplit('}',1)[-1]==name]
+        if optional and not found:return None
+        if len(found)!=1 or not found[0]:raise ValueError('铁路OFD字段缺失或不唯一：'+name)
+        return found[0]
+    number=field('ElectronicInvoiceRailwayETicketNumber');buyer=field('NameOfPurchaser');buyerid=field('UnifiedSocialCreditCodeOfPurchaser');passenger=field('Name')
+    if not re.fullmatch(r'\d{20}',number)or field('measure')!='iso4217:CNY'or field('TypeOfBusiness')!='售':raise ValueError('铁路OFD号码、币种或售票类型未接通')
+    issue=date.fromisoformat(field('DateOfIssue'));travel=date.fromisoformat(field('TravelDate'));fare=field('Fare');net=field('TotalAmountExcludingTax');tax=field('TaxAmount')
+    if any(not re.fullmatch(r'\d+\.\d{2}',v)for v in [fare,net,tax])or Decimal(net)+Decimal(tax)!=Decimal(fare):raise ValueError('铁路OFD价税金额不闭合')
+    text=normalize(pages[0]['text'])
+    if any(normalize(v)not in text for v in [number,buyer,buyerid,passenger,fare,field('DepartureStation'),field('DestinationStation'),field('SeatLevel')]):raise ValueError('铁路OFD字段未获页面文字支持')
+    for d in [issue,travel]:
+        dates={d.isoformat()}|{f'{d.year}年{m}月{day}日'for m in [str(d.month),f'{d.month:02d}']for day in [str(d.day),f'{d.day:02d}']}
+        if not any(v in text for v in dates):raise ValueError('铁路OFD日期未获页面文字支持')
+    projected=f'电子发票（铁路电子客票）\n发票号码：{number}\n开票日期：{issue.isoformat()}\n购买方名称：{buyer}\n统一社会信用代码/纳税人识别号：{buyerid}\n票价：¥{fare}'
+    result=fields_from_page(projected,1,expected_title,expected_tax_id)
+    if result['total_amount']!=fare or result['buyer_title']!=buyer or result['buyer_tax_id']!=buyerid:raise ValueError('铁路OFD投影与原字段不一致')
+    original=field('NumberOfOriginalInvoice',True)
+    result.update(extraction_method='ofd_railway_text_and_embedded_xml',net_amount=net,tax_amount=tax,referenced_invoice_numbers=[original]if original else [],payer_name=passenger,
+                  embedded_xml={'member':member,'sha256':hashlib.sha256(raw).hexdigest(),'page_text_verified':True},
+                  native_railway_fields={k:field(k)for k in ['DepartureStation','DestinationStation','TrainNumber','TravelDate','DepartureTime','SeatLevel','Name']})
+    result['verification']['fields'].update(net_amount=net)
+    return result
+
+
+def ofd_vat_fields(path,pages,expected_title=None,expected_tax_id=None):
+    """Resolve VAT semantic ObjectRefs against the exact printed OFD objects."""
+    with zipfile.ZipFile(path)as archive:
+        members=archive.infolist()
+        if len(members)>512 or len({x.filename for x in members})!=len(members):raise ValueError('OFD成员过多或重名')
+        def xml(name):
+            if not re.fullmatch(r'Doc_\d+/(?:Tags/(?:Tag|CustomTags)|Document|Pages/Page_\d+/Content)\.xml',name):raise ValueError('OFD语义引用越界')
+            item=archive.getinfo(name)
+            if item.file_size>2*1024*1024:raise ValueError('OFD语义XML过大')
+            raw=archive.read(item)
+            if b'<!DOCTYPE'in raw.upper()or b'<!ENTITY'in raw.upper():raise ValueError('OFD XML不接受实体')
+            return raw,ElementTree.fromstring(raw)
+        tagged=[]
+        for item in members:
+            if re.fullmatch(r'Doc_\d+/Tags/Tag\.xml',item.filename):
+                raw,root=xml(item.filename)
+                if root.tag.rsplit('}',1)[-1]=='EInvoice'and root.find('.//TotalTax-includedAmount')is not None:tagged.append((item.filename,raw,root))
+        if not tagged:return None
+        if len(tagged)!=1 or len(pages)!=1:raise ValueError('语义增值税OFD须单页唯一发票')
+        member,raw,root=tagged[0];prefix=member.split('/')[0];_,document=xml(prefix+'/Document.xml');objects={}
+        for page in document.iter():
+            if page.tag.rsplit('}',1)[-1]!='Page':continue
+            pageid=page.attrib['ID'];location=prefix+'/'+page.attrib['BaseLoc'];_,content=xml(location)
+            for obj in content.iter():
+                if obj.tag.rsplit('}',1)[-1]!='TextObject':continue
+                key=(pageid,obj.attrib['ID']);text=''.join(x.text or ''for x in obj.iter()if x.tag.rsplit('}',1)[-1]=='TextCode')
+                if key in objects:raise ValueError('OFD页面文字对象身份重复')
+                objects[key]=text
+        def field(name):
+            matches=[e for e in root.iter()if e.tag.rsplit('}',1)[-1]==name]
+            if len(matches)!=1:raise ValueError('OFD语义字段缺失或不唯一：'+name)
+            out=[]
+            for node in matches[0]:
+                tag=node.tag.rsplit('}',1)[-1]
+                if tag=='ObjectData':out.append(node.text or '')
+                elif tag=='ObjectRef':
+                    key=(node.attrib.get('PageRef'),(node.text or '').strip())
+                    if key not in objects:raise ValueError('OFD对象引用不存在：'+name)
+                    out.append(objects[key])
+            if not out or not ''.join(out).strip():raise ValueError('OFD语义字段为空：'+name)
+            return ''.join(out).strip()
+        number=field('InvoiceNumber')
+        if number!=field('EIid')or not re.fullmatch(r'\d{20}',number):raise ValueError('OFD语义及票面号码不一致')
+        buyer,buyerid,seller,sellerid=(field(k)for k in ['BuyerName','BuyerIdNum','SellerName','SellerIdNum'])
+        values={}
+        for key,name in [('total','TotalTax-includedAmount'),('net','TotalAmWithoutTax'),('tax','TotalTaxAm')]:
+            value=field(name).lstrip('¥￥').replace(',','')
+            if not re.fullmatch(r'\d+(?:\.\d{1,2})?',value):raise ValueError('OFD语义金额格式错误')
+            values[key]=f'{Decimal(value):.2f}'
+        if Decimal(values['net'])+Decimal(values['tax'])!=Decimal(values['total']):raise ValueError('OFD价税合计不闭合')
+        issued=field('IssueTime');date_match=re.fullmatch(r'(\d{4})[年-](\d{1,2})[月-](\d{1,2})日?',issued)
+        if not date_match:raise ValueError('OFD开票日期格式不支持')
+        issue=date(*map(int,date_match.groups())).isoformat()
+        text=normalize(pages[0]['text'])
+        if any(normalize(v)not in text for v in [number,buyer,buyerid,seller,sellerid,*values.values(),issued]):raise ValueError('OFD语义字段未获原页面文字支持')
+        projected=('电子发票\n发票号码：'+number+'\n开票日期：'+issue+'\n名称：'+buyer+'  名称：'+seller+'\n纳税人识别号：'+buyerid+'  纳税人识别号：'+sellerid+'\n项目名称\n合计 ¥'+values['net']+' ¥'+values['tax']+'\n价税合计（小写） ¥'+values['total'])
+        result=fields_from_page(projected,1,expected_title,expected_tax_id)
+        if result['total_amount']!=values['total']or result['buyer_title']!=buyer or result['buyer_tax_id']!=buyerid:raise ValueError('OFD字段投影与源对象不一致')
+        result.update(extraction_method='ofd_semantic_tags_and_page_text',embedded_xml={'member':member,'sha256':hashlib.sha256(raw).hexdigest(),'page_text_verified':True})
+        return result
+
+
 def read_invoice(path, expected_title=None, expected_tax_id=None):
     path=Path(path).resolve()
     if path.stat().st_size>30*1024*1024:raise ValueError('单份票据超过30MiB，请分来源核对')
@@ -250,6 +425,15 @@ def read_invoice(path, expected_title=None, expected_tax_id=None):
         pages=[{'page':1,'method':'unreadable','text':'','mean_confidence':None,
                 'error':'OCR_REQUIRED: 图片先经远程OCR或人工核对；票面审核不隐式启动本地识别'}]
     else:raise ValueError('票据字段入口支持PDF、OFD及常用图片')
+    if suffix=='.ofd':
+        railway=ofd_railway_fields(path,pages,expected_title,expected_tax_id)
+        if railway is not None:return {'path':str(path),'sha256':hashlib.sha256(path.read_bytes()).hexdigest(),'pages':[railway],'authenticity_verified':False,'system_write':False,'parser_version':'0.2.3'}
+        semantic=ofd_vat_fields(path,pages,expected_title,expected_tax_id)
+        if semantic is not None:return {'path':str(path),'sha256':hashlib.sha256(path.read_bytes()).hexdigest(),'pages':[semantic],'authenticity_verified':False,'system_write':False,'parser_version':'0.2.3'}
+        airline=ofd_airline_fields(path,pages,expected_title,expected_tax_id)
+        if airline is not None:
+            return {'path':str(path),'sha256':hashlib.sha256(path.read_bytes()).hexdigest(),'pages':[airline],
+                'authenticity_verified':False,'system_write':False,'parser_version':'0.2.2'}
     fields=[]
     for p in pages:
         result=fields_from_page(p['text'],p['page'],expected_title,expected_tax_id)

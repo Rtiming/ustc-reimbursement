@@ -14,3 +14,5 @@
 OCR先检查ocr_status，再用本案收件job调用material_ocr；不直接拿路径执行脚本，不默认识别已有文字页。远程任务用material_ocr_resume接续原run。无服务器的新用户可明确--with-ocr安装本地模型，默认安装不下载模型。OCR结果只作候选，不自动确认票号、金额、身份或审批。
 
 本包不含个人凭据库、远程总账运行服务、手机采集通道或表格创作运行时。缺少外部能力应返回具体缺项，不能伪造已执行或私自改用其他上传服务。
+
+人工与代理接手同一活动时，使用case_journey查看下一步；材料、付款和行程从case_materials进入。compact工具集按discover→schema（inputs.action可取单个操作字段）→call或prepare→confirm→status接续，保留原intent_id/job_id。分单登记本地子案，不等于已创建学校报销单；纸质原件只登记，逐页去向确认后才能生成电子附件。

@@ -1,5 +1,11 @@
 # USTC Reimbursement Toolkit
 
+[English](README.en.md)
+
+人工与AI代理共用的中国科大报销工作台。可从桌面入口导入材料、关联付款和行程、按规则分单、继续填报、处理补件并导出Excel与A4附件；代理通过MCP或CLI操作同一活动和任务。
+
+Windows完整离线包包含独立Python和固定依赖，解压后双击“安装报销工作台.cmd”。普通源码包支持Windows、macOS和Linux的安装与离线材料处理；学校财务操作使用本人本机Edge连接。验证码及最终本人确认仍在学校页面完成。
+
 [中文](README.md) | [English](README.en.md)
 
 当前版本为0.5.0-beta.2测试版，见[中英文发布说明](docs/releases/v0.5.0-beta.2.md)。Windows真实财务流程尚未实测；此测试版用于隔离安装、资料处理和接口试用，不代表真实批准、系统导出或5分钟整批目标已通过。旧0.4安装不会自动获得本版安全修复。
@@ -32,7 +38,9 @@ Windows将入口换成`install.cmd`，路径换成本机绝对路径。平台前
 
 ## 交给AI使用
 
-安装生成`.local/client-configs/mcp.json`，将该服务合并到支持stdio MCP的客户端。没有MCP的代理可以读取[AGENTS.md](AGENTS.md)，经同一CLI/JSON接口调用：
+安装生成`.local/client-configs/mcp.json`。DeepSeek等需要简明工具目录的客户端优先使用`mcp-compact.json`：仅暴露3个入口，按需发现全部业务；DSH配置默认使用此模式。将选定服务合并到支持stdio MCP的客户端。没有MCP的代理可以读取[AGENTS.md](AGENTS.md)，经同一CLI/JSON接口调用：
+
+安装报告提供“打开报销工作台”“打开反馈台”和“启动DSH助手”入口。日常人工操作从报销工作台开始，不需要AI客户端或命令行。已有工作台可在安装时加`--review-workspace 工作台绝对路径`，须在`--data-dir`范围内。DSH入口使用项目独立覆盖层，需本机已安装DSH并配置自己的模型；其他代理继续用MCP或CLI。完整步骤见[部署指南](docs/部署指南.md#一次安装并接续反馈台)。
 
 ```json
 {"method":"capabilities","params":{"intent":"materials"}}
@@ -48,8 +56,9 @@ Windows将入口换成`install.cmd`，路径换成本机绝对路径。平台前
 | 本地OCR | 显式`--with-ocr`；输出是待核对候选 |
 | 远程OCR/总账 | 另外部署提供方，不依赖作者账号或服务器 |
 | 科大财务网页 | 本机Edge接线、本人登录、逐动作实测；短信验证码本人填写 |
-| 登记整批工作页 | macOS已有实现；Windows测试版已接统一接口，真实财务尚未实测；Linux不支持财务网页操作 |
-| 手机采集/Excel成品 | 可选外部适配器，不包含其服务或专有运行时 |
+| 登记整批工作页 | Windows与macOS使用原生桥；跨设备业务和本人角色需各自现场验收；Linux不支持财务网页操作 |
+| Excel清单与挂单理由汇总 | 本地依赖随安装提供，不需要专有表格创作运行时 |
+| 手机采集 | 需本机配置设备通道 |
 
 查看明细PDF与原生列表导出是两个独立操作。安装自检只使用合成材料，不登录财务、不批准真实单据。实测范围见[验证说明](docs/验证说明.md)。
 
@@ -72,3 +81,5 @@ Windows将入口换成`install.cmd`，路径换成本机绝对路径。平台前
 `sh update.sh`检查版本，`sh update.sh --install`核验后在新目录安装；Windows使用`update.cmd`。旧目录保留已有案件和恢复现场，新工作使用新MCP片段。没有更新入口的旧版先手动核SHA下载本版一次。
 
 `sh install.sh --config /绝对路径/deployment.local.json --plan`只读预览部署；配置可从`distribution/deployment.example.json`复制。完整范围及案件迁移限制见[部署指南](docs/部署指南.md)。
+
+反馈台从`capabilities(intent="review") → material_review(action="list")`进入；已有工作台首次register绝对路径后open，材料目录与事件继续沿用。参数入口`assistant.py material-review open --workspace 工作台绝对路径`。状态与导出见[材料核对工作台](docs/材料核对工作台.md)。

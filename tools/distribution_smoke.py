@@ -356,8 +356,7 @@ def main():
     args = parser.parse_args()
     if not args.output.is_absolute() or args.output.exists():
         raise ValueError('output须为尚不存在的绝对回执路径')
-    result = run(with_mcp=args.mcp, with_materials=args.materials, with_ocr=args.ocr,
-                 work_dir=args.work_dir or args.output.with_name(args.output.stem + '-workspace'))
+    result = run(with_mcp=args.mcp, with_materials=args.materials, with_ocr=args.ocr, work_dir=args.work_dir or args.output.with_name(args.output.stem + '-workspace'))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(
         json.dumps(result, ensure_ascii=False, indent=2) + '\n', encoding='utf-8'

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 CASE_PROFILES = ('student_activity', 'research_purchase', 'travel')
-CAPABILITY_INTENTS = ('materials', 'rules', 'ocr', 'finance', 'export')
+CAPABILITY_INTENTS = ('materials', 'review', 'rules', 'ocr', 'finance', 'export')
 MATERIAL_OPERATIONS = frozenset({'material_intake', 'material_ocr'})
 REGISTERED_PHASES = (
     'status',
@@ -13,6 +13,7 @@ REGISTERED_PHASES = (
     'materials',
     'approve',
     'export-system',
+    'print',
     'export-list',
     'finish',
 )
@@ -28,10 +29,12 @@ WORKFLOW_PHASES = (
     'materials',
     'approve',
     'export-system',
+    'print',
     'export-list',
     'finish',
 )
 DOCS = {
+    'review': 'docs/材料核对工作台.md',
     'quickstart': 'docs/助手快速开始.md',
     'start': 'docs/助手接口使用.md',
     'workflow': 'docs/助手操作规程.md',
@@ -47,23 +50,20 @@ DOCS = {
     'export': 'docs/财务PDF导出.md',
     'windows': 'docs/Windows静默财务桥.md',
     'ocr': 'docs/OCR统一流程.md',
-    'batch-workflow': 'docs/整批流程与登记.md',
-    'configuration': 'docs/配置说明.md',
-    'security': 'SECURITY.md',
+    'remuneration': 'skills/ustc-reimbursement/references/remuneration.md',
+    'execution': 'skills/ustc-reimbursement/references/execution-modes.md',
+    'business': 'docs/底层业务接口.md',
 }
 GUIDE_LANGUAGES = ('zh', 'en')
-DOCS_EN = {
-    'quickstart': 'docs/en/user-guide.md', 'start': 'docs/en/user-guide.md',
-    'workflow': 'docs/en/batch-workflow.md', 'batch-workflow': 'docs/en/batch-workflow.md',
-    'fields': 'docs/en/interfaces.md', 'devices': 'docs/en/deployment.md',
-    'configuration': 'docs/en/configuration.md', 'security': 'SECURITY.en.md',
-    'standards': 'docs/en/rules-and-planning.md', 'planning': 'docs/en/rules-and-planning.md',
-    **{topic: 'docs/en/materials-and-ocr.md' for topic in ('materials', 'printing', 'activity', 'ledger', 'intake', 'ocr')},
-    'export': 'docs/en/batch-workflow.md', 'windows': 'docs/en/batch-workflow.md',
-}
+DOCS.update({'batch-workflow': 'docs/整批流程与登记.md', 'configuration': 'docs/配置说明.md', 'security': 'SECURITY.md'})
+DOCS_EN = {'quickstart': 'docs/en/user-guide.md', 'start': 'docs/en/user-guide.md', 'workflow': 'docs/en/batch-workflow.md', 'batch-workflow': 'docs/en/batch-workflow.md', 'fields': 'docs/en/interfaces.md', 'devices': 'docs/en/deployment.md', 'configuration': 'docs/en/configuration.md', 'security': 'SECURITY.en.md', 'standards': 'docs/en/rules-and-planning.md', 'planning': 'docs/en/rules-and-planning.md', 'materials': 'docs/en/materials-and-ocr.md', 'printing': 'docs/en/materials-and-ocr.md', 'activity': 'docs/en/materials-and-ocr.md', 'ledger': 'docs/en/materials-and-ocr.md', 'intake': 'docs/en/materials-and-ocr.md', 'ocr': 'docs/en/materials-and-ocr.md', 'export': 'docs/en/batch-workflow.md', 'windows': 'docs/en/batch-workflow.md'}
+for topic in DOCS:
+    DOCS_EN.setdefault(topic, 'docs/en/interfaces.md')
+
 JSON_METHODS = frozenset(
     {
         'cases',
+        'applicant_batch',
         'overview',
         'guide',
         'new_case',
@@ -88,9 +88,11 @@ JSON_METHODS = frozenset(
         'bridge',
         'register_workflow',
         'workflow',
+        'material_review',
         'standards_init',
         'standards_add_profile',
         'standards_read',
+        'standards_import',
         'standards_change',
         'standards_select',
         'batch_plan',
@@ -101,6 +103,22 @@ JSON_METHODS = frozenset(
         'material_ocr',
         'material_ocr_resume',
         'pdf_export',
+        'print_batch',
+        'business',
+        'finance_feedback',
+        'intake_review',
+        'task_view',
+        'assist',
+        'case_details',
+        'case_journey',
+        'case_finance',
+        'case_delivery',
+        'case_materials',
+        'finance_connection',
+        'material_requirements',
+        'intake_groups',
+        'receive_materials',
+        'approver_batch',
         'pdf_export_inspect',
     }
 )

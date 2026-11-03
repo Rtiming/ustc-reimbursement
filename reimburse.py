@@ -29,7 +29,10 @@ def overview(path):
     c = json.loads(paths['form'].read_text(encoding='utf-8'))
     state = json.loads(paths['state'].read_text(encoding='utf-8'))
     pending = report.get('material_audit') or {}
-    started = bool(c.get('review', {}).get('workflow_started'))
+    native_started = (state.get('last_native_workflow_action', {}).get('schema') == 'ustc-native-workflow-v1'
+                      and state['last_native_workflow_action'].get('independent_http_readback') is True
+                      and state['last_native_workflow_action'].get('workflow_started') is True)
+    started = bool(c.get('review', {}).get('workflow_started') or native_started)
     correcting = state.get('status') in ['correction_in_progress', 'correction_saved_await_abstract', 'correction_saved_await_resubmission']
     pending_file = paths['state'].parent/'pending_write.json'
     pending_write = json.loads(pending_file.read_text(encoding='utf-8')) if pending_file.exists() else None
@@ -47,7 +50,7 @@ def overview(path):
     if not (fields.get('t-req_mobile') or fields.get('t-req_tele')): missing.append({'field': 'basic.fields', 'information': '联系人电话'})
     command = ['python3', 'reimburse.py', '--bundle', str(Path(path).resolve())]
     return {'case_id': b['case_id'], 'serial': c.get('serial'), 'amount': c.get('amount'),
-            'known_state': state.get('status'), 'known_node': state.get('node'),
+            'known_state': state.get('status'), 'known_node': state.get('node') or ('508' if native_started else None),
             'state_observed_at_utc': state.get('updated_at_utc'), 'state_is_cached_not_live': True,
             'counts': {'invoices': report['original_count'], 'payments': len(c.get('payments', [])), 'funding': len(c.get('funding', []))},
             'local_parameter_errors': report['errors'],
@@ -75,11 +78,17 @@ def run_tool(name, params, **kwargs):
     return subprocess.run([sys.executable, str(ROOT/'tools'/name), *map(str, params)], cwd=ROOT, env=child_env(), **kwargs)
 
 
-def freeze_upload_batch(paths, case_id, offset, count, stage='upload', uploaded_evidence=None):
+def freeze_upload_batch(paths, case_id, offset, count, stage='upload', uploaded_evidence=None, *, expected_userid=None):
     """冻结实际源文件/票号及明确账号；与原生上传工具使用同一批次摘要。"""
     from prepare_native_upload import batch_identity
     manifest_path = paths['invoices']
     manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+    identity_source='manifest.expected_userid'
+    if expected_userid is not None:
+        if not isinstance(expected_userid,str) or not re.fullmatch(r'[A-Za-z0-9]{2,40}',expected_userid):raise ValueError('显式执行账号格式不符')
+        if manifest.get('expected_userid')not in (None,'',expected_userid):raise ValueError('manifest与显式执行账号不同')
+        if not manifest.get('expected_userid'):
+            manifest={**manifest,'expected_userid':expected_userid};identity_source='explicit_execution_identity'
     batch = batch_identity(manifest, offset, count)
     if batch['caseId'] != case_id or stage not in ['upload', 'save-upload']:
         raise ValueError('上传批次案件或阶段不符')
@@ -98,6 +107,7 @@ def freeze_upload_batch(paths, case_id, offset, count, stage='upload', uploaded_
     result = {'schema': 'ustc-pending-native-upload-v1', 'stage': stage, 'batch': batch,
               'manifest_path': str(manifest_path.resolve()),
               'source_file_sha256': hashlib.sha256(manifest_path.read_bytes()).hexdigest(), 'source_invoices': sources}
+    if expected_userid is not None:result['identity_source']=identity_source
     if uploaded_evidence is not None: result['uploaded_evidence'] = uploaded_evidence
     return result
 
@@ -234,6 +244,107 @@ def acknowledge(paths, receipt, note, outcome):
     previous = json.loads(lock.read_text(encoding='utf-8'))
     if outcome not in ['saved', 'staged', 'not_applied', 'needs_correction']:
         raise ValueError('未知回读结果')
+    if previous.get('verification',{}).get('schema')=='ustc-approver-step-v1':
+        from finance_approver_batch import verify_ack as verify_approver_ack
+        if not note.strip():raise ValueError('须按原角色、操作者、意见和金额核对审批结果')
+        verified=verify_approver_ack(previous,json.loads(Path(receipt).read_text(encoding='utf-8')),outcome)
+        previous.update(readback_receipt=str(Path(receipt).resolve()),operator_checked_note=note,outcome=outcome,
+                        status='operator_readback_recorded',native_approver_readback=verified)
+        output=Path(previous['output_directory'])/'operator_readback_ack.json';write_json(output,previous)
+        state=json.loads(paths['state'].read_text(encoding='utf-8'));state['last_approver_action']=verified
+        write_json(paths['state'],state);lock.unlink()
+        return {'ok':True,'system_write':False,'pending_cleared':True,'acknowledgement':str(output),**verified}
+    if previous.get('operation')=='submission:applicant-agree'and json.loads(Path(receipt).read_text()).get('result',{}).get('action')=='applicant-http-inspect':
+        from finance_native_applicant import verify_legacy_sms_unapplied
+        if not note.strip():raise ValueError('须说明原短信停点未应用的独立核验')
+        verified=verify_legacy_sms_unapplied(previous,json.loads(Path(receipt).read_text()),outcome)
+        previous.update(readback_receipt=str(Path(receipt).resolve()),operator_checked_note=note,outcome=outcome,status='operator_readback_recorded',native_sms_reconciliation=verified)
+        output=Path(previous['output_directory'])/'operator_readback_ack.json';write_json(output,previous);lock.unlink()
+        return {'ok':True,'system_write':False,'pending_cleared':True,'acknowledgement':str(output),**verified}
+    if previous.get('verification',{}).get('schema')=='ustc-native-applicant-v1':
+        from finance_native_applicant import verify_ack as verify_applicant_ack
+        if not note.strip():raise ValueError('须核对原单金额及本人节点日志')
+        verified=verify_applicant_ack(previous,json.loads(Path(receipt).read_text()),outcome)
+        previous.update(readback_receipt=str(Path(receipt).resolve()),operator_checked_note=note,outcome=outcome,status='operator_readback_recorded',native_applicant_readback=verified)
+        output=Path(previous['output_directory'])/'operator_readback_ack.json';write_json(output,previous)
+        state=json.loads(paths['state'].read_text());state['last_native_applicant_action']=verified
+        if verified['applicant_completed']:
+            form=json.loads(paths['form'].read_text());form.setdefault('review',{}).update(workflow_started=True,workflow_status='submitted_to_approval',node=verified['node_id']);write_json(paths['form'],form)
+            state.update(status='submitted_to_approval',submission_completed=True,node=verified['node_id'],operator_last_readback=str(Path(receipt).resolve()))
+        write_json(paths['state'],state);lock.unlink()
+        return {'ok':True,'system_write':False,'pending_cleared':True,'acknowledgement':str(output),**verified}
+    if previous.get('verification',{}).get('schema')=='ustc-native-workflow-v1':
+        if not note.strip():raise ValueError('须核对原流程实例、节点和所有未改字段')
+        from finance_native_workflow import verify_ack as verify_workflow_ack
+        verified=verify_workflow_ack(previous,json.loads(Path(receipt).read_text()),outcome)
+        previous.update(native_workflow_readback=verified,readback_receipt=str(Path(receipt).resolve()),operator_checked_note=note,outcome=outcome)
+        output=Path(previous['output_directory'])/'operator_readback_ack.json';write_json(output,previous)
+        state=json.loads(paths['state'].read_text());state['last_native_workflow_action']=verified
+        if verified['workflow_started']:state.update(status='submitted_to_approval',node='508',updated_at_utc=stamp(),submission_last_readback=str(Path(receipt).resolve()))
+        write_json(paths['state'],state);lock.unlink()
+        return {'ok':True,'pending_cleared':True,'system_write':False,**verified}
+    if previous.get('verification',{}).get('schema')=='ustc-native-student-remuneration-v1':
+        if not note.strip():raise ValueError('须核对完整劳务人员、金额、银行卡、期间和学校税务结果')
+        from finance_native_remuneration import verify_ack as verify_remuneration_ack
+        verified=verify_remuneration_ack(previous,json.loads(Path(receipt).read_text()),outcome)
+        previous.update(native_remuneration_readback=verified,readback_receipt=str(Path(receipt).resolve()),operator_checked_note=note,outcome=outcome)
+        output=Path(previous['output_directory'])/'operator_readback_ack.json';write_json(output,previous)
+        state=json.loads(paths['state'].read_text());state['last_native_remuneration_action']=verified;write_json(paths['state'],state);lock.unlink()
+        return {'ok':True,'pending_cleared':True,'system_write':False,**verified}
+    if previous.get('verification',{}).get('schema')=='ustc-native-invoice-split-v1':
+        if not note.strip():raise ValueError('须核对专项资格、完整逐票绑定和其他原字段')
+        from finance_native_split import verify_ack as verify_split_ack
+        verified=verify_split_ack(previous,json.loads(Path(receipt).read_text()),outcome)
+        previous.update(native_split_readback=verified,readback_receipt=str(Path(receipt).resolve()),operator_checked_note=note,outcome=outcome)
+        output=Path(previous['output_directory'])/'operator_readback_ack.json';write_json(output,previous)
+        state=json.loads(paths['state'].read_text());state.setdefault('native_split_groups',{})[verified['group']]={'acknowledgement':str(output),'sha256':hashlib.sha256(output.read_bytes()).hexdigest(),'result':verified};write_json(paths['state'],state);lock.unlink()
+        return {'ok':True,'pending_cleared':True,'system_write':False,**verified}
+    if previous.get('verification',{}).get('schema')=='ustc-native-invoice-amount-v1':
+        if not note.strip():raise ValueError('须逐票核对金额、原分组和未修改字段')
+        from finance_native_amount import verify_ack as verify_amount_ack
+        verified=verify_amount_ack(previous,json.loads(Path(receipt).read_text()),outcome)
+        previous.update(status='operator_readback_recorded',native_amount_readback=verified,
+                        readback_receipt=str(Path(receipt).resolve()),operator_checked_note=note,outcome=outcome)
+        output=Path(previous['output_directory'])/'operator_readback_ack.json';write_json(output,previous)
+        state=json.loads(paths['state'].read_text());state['last_native_amount_action']=verified
+        if verified.get('financial_amount_verified')is True:
+            proofs=state.setdefault('native_amount_reductions',[]);proofs.append({'acknowledgement':str(output),'sha256':hashlib.sha256(output.read_bytes()).hexdigest()})
+        write_json(paths['state'],state);lock.unlink()
+        return {'ok':True,'pending_cleared':True,'system_write':False,**verified}
+    if previous.get('verification',{}).get('schema')in {'ustc-native-medical-edit-v1','ustc-native-travel-edit-v1'}:
+        if not note.strip():raise ValueError('须核对医保类型与全部原票支付字段')
+        from finance_native_invoice_edit import verify_ack as verify_medical_ack
+        verified=verify_medical_ack(previous,json.loads(Path(receipt).read_text()),outcome)
+        previous.update(native_medical_readback=verified,readback_receipt=str(Path(receipt).resolve()),operator_checked_note=note,outcome=outcome)
+        output=Path(previous['output_directory'])/'operator_readback_ack.json';write_json(output,previous)
+        state=json.loads(paths['state'].read_text());state['last_native_medical_edit'if verified['schema']=='ustc-native-medical-edit-v1'else'last_native_travel_edit']=verified;write_json(paths['state'],state);lock.unlink()
+        return {'ok':True,'pending_cleared':True,'system_write':False,**verified}
+    if previous.get('verification',{}).get('schema')=='ustc-native-submission-options-v1':
+        if not note.strip():raise ValueError('须说明合同、打印及未改辅助证据的独立核对')
+        from finance_native_submission import verify_ack as verify_submission_options
+        verified=verify_submission_options(paths,previous,json.loads(Path(receipt).read_text()),outcome)
+        previous.update(readback_receipt=str(Path(receipt).resolve()),operator_checked_note=note,outcome=outcome,
+                        status='operator_readback_recorded',native_submission_options_readback=verified)
+        output=Path(previous['output_directory'])/'operator_readback_ack.json';write_json(output,previous)
+        state=json.loads(paths['state'].read_text());state['last_native_submission_options']={'readback_receipt':str(Path(receipt).resolve()),**verified}
+        write_json(paths['state'],state);lock.unlink()
+        return {'ok':True,'system_write':False,'pending_cleared':True,'acknowledgement':str(output),**verified}
+    if previous.get('operation') in {'invoice:http-cleanup','invoice:http-reidentify'}:
+        if outcome not in {'saved','not_applied','needs_correction'} or not note.strip():raise ValueError('HTTP清理只接受完整回读后的saved/not_applied及检查说明')
+        from finance_native_retry import verify_ack as verify_cleanup_ack
+        verified=verify_cleanup_ack(previous,receipt,outcome)
+        previous.update(readback_receipt=str(Path(receipt).resolve()),operator_checked_note=note,
+                        outcome=outcome,status='operator_readback_recorded',native_cleanup_readback=verified)
+        output=Path(previous['output_directory'])/'operator_readback_ack.json'
+        write_json(output,previous)
+        state=json.loads(paths['state'].read_text(encoding='utf-8'))
+        state['last_native_reidentify' if previous['operation']=='invoice:http-reidentify' else 'last_native_cleanup']={'readback_receipt':str(Path(receipt).resolve()),**verified}
+        write_json(paths['state'],state)
+        lock.unlink()
+        return {'ok':True,'system_write':False,'pending_cleared':True,'acknowledgement':str(output),**verified}
+    if previous['operation']=='remuneration:add-person':
+        from finance_remuneration_save import verify_saved
+        verify_saved(previous,json.loads(Path(receipt).read_text()),outcome)
     is_upload = previous['operation'].startswith('upload:') or previous['operation'] == 'invoice:save-upload'
     if outcome == 'staged' and previous['operation'] not in ['submission:options', 'submission:next', 'expense_amount:open', 'expense_amount:return'] and not previous['operation'].startswith('upload:'):
         raise ValueError('staged只用于提交前合同、打印选项和原生下一步，不能冒充最终提交')
@@ -242,7 +353,29 @@ def acknowledge(paths, receipt, note, outcome):
     read_time = read.get('executed_at_utc')
     if not read_time or datetime.fromisoformat(read_time) <= datetime.fromisoformat(previous['started_at_utc']):
         raise ValueError('回读须晚于这次写入，不能用历史回执解锁')
+    if previous.get('verification',{}).get('schema')=='ustc-native-nonvat-entry-v1':
+        from finance_supplement import verify_ack as verify_nonvat_ack
+        verified=verify_nonvat_ack(previous,read,outcome)
+        if not note.strip():raise ValueError('写明凭据、金额、源字节及GUID核对结果')
+        manifest=json.loads(paths['invoices'].read_text());rows=manifest.setdefault('native_nonvat_entries',[])
+        if any(x['entry_id']==verified['entry_id']or x['guid']==verified['guid']for x in rows):raise ValueError('凭据登记重复')
+        rows.append(verified);write_json(paths['invoices'],manifest)
+        previous.update(outcome=outcome,status='operator_readback_recorded',readback_receipt=str(Path(receipt).resolve()),native_nonvat_readback=verified,operator_checked_note=note)
+        write_json(Path(previous['output_directory'])/'operator_readback_ack.json',previous);lock.unlink()
+        return {'ok':True,'native_nonvat_readback':verified,'financial_claim_created':False}
+    native_stage_result = None
+    if previous.get('verification', {}).get('schema') == 'ustc-native-stage-v1':
+        from finance_native_stage import verify_ack
+        native_stage_result = verify_ack(paths, previous, read, outcome)
+    native_upload_result=None
+    if previous.get('verification',{}).get('schema')=='ustc-native-http-upload-v1':
+        from finance_native_upload import verify_ack as verify_http_upload
+        native_upload_result=verify_http_upload(paths,previous,read,outcome)
     is_submission = previous.get('operation', '').startswith('submission:')
+    unadvanced_next = None
+    if previous.get('operation')=='submission:next' and outcome=='not_applied' and not r.get('serial'):
+        from submission import verify_next_still_draft
+        unadvanced_next=verify_next_still_draft(previous,read,json.loads(paths['form'].read_text()))
     expense_result = None
     if previous.get('operation') in ['expense_amount:open', 'expense_amount:return','expense_amount:save']:
         from finance_expense_amount import verify_ack
@@ -256,24 +389,30 @@ def acknowledge(paths, receipt, note, outcome):
             and not r.get('grids') and not r.get('frames') and r.get('forms')):
         from payment_recovery import verify_unsaved_payments
         unsaved_payment_result = verify_unsaved_payments(paths, previous, read, outcome)
-    if r.get('ok') is not True or (not r.get('grids') and not r.get('frames') and not (is_submission and r.get('forms')) and not has_upload_tracking and expense_result is None and unsaved_payment_result is None) or r.get('projid') != 'WF_YBX':
+    if native_stage_result is None and native_upload_result is None and (r.get('ok') is not True or (not r.get('grids') and not r.get('frames') and not (is_submission and r.get('forms')) and not has_upload_tracking and expense_result is None and unsaved_payment_result is None) or r.get('projid') != 'WF_YBX'):
         raise ValueError('须用readback的独立财务字段/表格回执，不接受保存请求或status摘要')
     if previous.get('serial') and r.get('serial') != previous['serial']:
         if not ((previous.get('operation') == 'submission:department' and not r.get('serial') and '待审批' in r.get('visibleText', ''))
-                or (previous.get('operation') == 'submission:applicant-agree' and not r.get('serial') and outcome == 'saved')):
+                or (previous.get('operation') == 'submission:applicant-agree' and not r.get('serial') and outcome == 'saved')
+                or unadvanced_next is not None):
             raise ValueError('回读单号与此次写入不一致')
-    upload_result = verify_upload_ack(previous, read, paths, outcome) if is_upload else None
+    upload_result = native_upload_result or (verify_upload_ack(previous, read, paths, outcome) if is_upload else None)
     draft_result = None
     if previous['operation'] == 'invoice:create-draft':
         from finance_draft_readback import classify_draft_readback
-        draft_result=classify_draft_readback(r,json.loads(paths['invoices'].read_text(encoding='utf-8')))
-        if outcome in ['needs_correction','not_applied'] and draft_result['state']!='blocked_by_invoice_metadata':
+        draft_result=classify_draft_readback(r,json.loads(paths['invoices'].read_text(encoding='utf-8')),read)
+        if outcome in ['needs_correction','not_applied'] and not (draft_result['state']=='blocked_by_invoice_metadata' or outcome=='not_applied' and draft_result['state'] in ['cancelled_before_creation','expired_session_not_created']):
             raise ValueError('建单未取得明确拒绝，不能解除未知创建意图')
         if outcome=='saved':raise ValueError('建单按bind-serial核对；不能用ack-write的saved替代真实单号绑定')
     if previous['operation'] == 'submission:options' and outcome in ['staged', 'saved']:
-        from submission import verify_options
-        verify_options(r, previous['serial'])
-    if previous['operation'] == 'step:payments' and outcome == 'saved':
+        form=json.loads(paths['form'].read_text())
+        if form.get('system_mode')=='remuneration':
+            from finance_remuneration_submission import verify_options
+            verify_options(form,r)
+        else:
+            from submission import verify_options
+            verify_options(r, previous['serial'])
+    if previous['operation'] == 'step:payments' and outcome == 'saved' and native_stage_result is None:
         payment_form = json.loads(paths['form'].read_text(encoding='utf-8'))
         if any(p.get('mode') == 'corporate_transfer' for p in payment_form.get('payments', [])):
             from finance_corporate_verify import verify_corporate_readback
@@ -298,6 +437,12 @@ def acknowledge(paths, receipt, note, outcome):
         from submission import verify_sms_gate
         submission_plan=json.loads(Path(previous['verification']['submission_plan']).read_text())
         verify_sms_gate(r,previous['serial'],submission_plan['expected_userid'])
+    if previous['operation']=='funding:add-candidate':
+        v=previous['verification'];rows=[row for grid in r.get('grids',[])if str(grid.get('funcno'))=='242' for row in grid.get('rows',[])if row.get('t.uni_prj_code')==v['expected_code']]
+        if outcome=='not_applied':
+            original=json.loads((Path(previous['output_directory'])/'output.json').read_text())
+            if original.get('result',{}).get('error')!='须先核实原生回填项目及负责人' or r.get('identity',{}).get('userid')!=v['expected_userid']:raise ValueError('未证明原添加在点击前拒绝')
+        elif outcome!='saved'or r.get('identity',{}).get('userid')!=v['expected_userid']or len(rows)!=1 or v['expected_owner']not in str(rows[0].get('t.CHARGE_NAME','')).split(','):raise ValueError('原生经费候选未唯一回读，保留添加意图')
     expected_remark = previous.get('verification', {}).get('expected_remark')
     if outcome=='saved' and expected_remark:
         from correction import remark_matches
@@ -319,10 +464,17 @@ def acknowledge(paths, receipt, note, outcome):
     if not note.strip(): raise ValueError('写明检查了哪些字段和结果，不用空白说明解锁')
     previous.update(readback_receipt=str(Path(receipt).resolve()), operator_checked_note=note, outcome=outcome, status='operator_readback_recorded')
     if expense_result is not None: previous['expense_amount_window_readback'] = expense_result
+    if native_stage_result is not None: previous['native_stage_readback'] = native_stage_result
     if draft_result is not None:previous['draft_readback']=draft_result
+    if unadvanced_next is not None:previous['unadvanced_next_readback']=unadvanced_next
     output = Path(previous['output_directory'])/'operator_readback_ack.json'
     write_json(output, previous)
     state = json.loads(paths['state'].read_text(encoding='utf-8'))
+    if native_stage_result and native_stage_result.get('identity_repair'):
+        from finance_native_create import ref
+        state['basic_identity_repair_required']=ref(output)
+    elif native_stage_result and native_stage_result.get('stage')=='basic'and outcome=='saved':
+        state.pop('basic_identity_repair_required',None)
     previous_status = state.get('status')
     if previous['operation'].startswith('correction:'):
         state.update(status='correction_in_progress', correction_last_operation=previous['operation'],
@@ -372,6 +524,10 @@ def acknowledge(paths, receipt, note, outcome):
         state['last_native_upload_batch'] = upload_result
         previous['upload_reconciliation'] = upload_result
         write_json(output, previous)
+        if upload_result.get('schema')=='ustc-native-http-upload-v1':
+            reference={'path':str(output.resolve()),'sha256':hashlib.sha256(output.read_bytes()).hexdigest()}
+            refs=state.setdefault('native_upload_acknowledgements',[])
+            if reference not in refs:refs.append(reference)
     state['updated_at_utc'] = stamp()
     write_json(paths['state'], state)
     lock.unlink()
@@ -401,6 +557,7 @@ def render_document(source, destination):
 
 
 def guard_step(c, stage):
+    if c.get('system_mode')=='remuneration'and stage not in {'basic','funding'}:raise ValueError('薪酬仅复用基本信息和经费阶段；其余走原生薪酬核对，不重复普通转卡')
     if c.get('review', {}).get('workflow_started'):
         raise ValueError('已有流程；当前入口禁止重新按草稿填写。按总览处理材料和本人审核；明确变更任务另按实际环节续办')
     if stage == 'notes' and c.get('explanations', {}).get('record_only'):
@@ -698,7 +855,20 @@ def main():
             write_json(paths['invoices'], selected)
             emit({'ok': True, 'count': len(selected['selected_invoices']), 'expected_amount': selected['expected_amount'], 'system_write': False}); return 0
         if not re.fullmatch(r'\d+', args.serial): raise ValueError('单号须为数字')
+        pending_path=paths['state'].parent/'pending_write.json'
+        if pending_path.exists()and json.loads(pending_path.read_text()).get('operation')=='remuneration:http-create-claim':
+            from finance_native_remuneration import bind_created
+            emit(bind_created(paths,args.receipt,args.serial));return 0
+        if pending_path.exists()and json.loads(pending_path.read_text()).get('operation')=='remuneration:create-claim':
+            from finance_remuneration_save import bind_created
+            emit(bind_created(paths,args.receipt,args.serial));return 0
         read = json.loads(args.receipt.read_text(encoding='utf-8'))
+        if read.get('schema')=='ustc-native-allowance-create-v1':
+            from finance_allowance import bind_created
+            emit(bind_created(paths,args.receipt,args.serial));return 0
+        if read.get('schema')=='ustc-native-create-v1':
+            from finance_native_create import bind_created
+            emit(bind_created(paths,args.receipt,args.serial));return 0
         r = read.get('result', read)
         if r.get('serial') != args.serial or r.get('projid') != 'WF_YBX' or r.get('ok') is not True or not m.get('draft_creation_requested'):
             raise ValueError('需要原建单请求及当前财务单据独立回读；列表中其他单号或创建请求不作依据')
@@ -752,17 +922,19 @@ def main():
         if stage: guard_step(c, stage)
         steps = stage or args.steps
         execute = getattr(args, 'execute', False)
+        from finance_native_stage import STAGES as HTTP_STAGES, freeze_input, run as run_http_stage
+        if stage in HTTP_STAGES:
+            request = {'case_id':c['case_id'], 'parameters':{'stage':stage,'tab_id':args.tab_id},
+                       'execute':execute,'request_id':out.name}
+            source = freeze_input(args.bundle, paths, request, out)
+            return run_http_stage(source, out/'output.json')
         if execute:
-            if platform.system() != 'Darwin': raise ValueError('实际执行目前仅macOS Edge；Windows静默后端尚未验收，不自动转前台')
-            status_path = out/'before_status.json'
-            result = run_tool('finance_cli.py', ['status', '--case', paths['form'], '--output', status_path, *(['--tab-id', args.tab_id] if args.tab_id else [])])
-            if result.returncode: return result.returncode
-            status = json.loads(status_path.read_text(encoding='utf-8'))['result']
-            if status.get('applicantAgreementVisible') or status.get('node') == '508': raise ValueError('现场已到本人审核，禁止重走填写/普通承诺')
-            begin_write(paths, c, 'step:'+stage, out)
+            raise ValueError('native_http_adapter_required: 此阶段仍待固定HTTP适配，不能执行旧界面步骤')
         return run_tool('run_case.py', ['--case', paths['form'], '--steps', steps, '--output-dir', out, *(['--execute'] if execute else []), *(['--tab-id', args.tab_id] if getattr(args, 'tab_id', None) else [])]).returncode
     if args.command in ['invoice', 'upload']:
         execute = args.execute
+        if execute and (args.command=='upload' or args.action!='read'):
+            raise ValueError('native_http_adapter_required: 旧CLI上传/建单写路径已停用；日常上传使用统一invoice action=upload，其他动作按business指南核对迁移状态')
         if execute and platform.system() != 'Darwin': raise ValueError('此原生发票执行桥目前仅macOS Edge；Windows仅支持离线开发，静默后端尚未验收')
         if execute:guard_invoice_entry(c,m,args.command,getattr(args,'action',None))
         if args.command == 'invoice':

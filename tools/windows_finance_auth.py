@@ -46,14 +46,8 @@ def memory_call(bridge,packet):
 def configuration():
     path=ROOT/'data/finance_access.json'
     if not path.is_file(): raise ValueError('credential_reference_required')
-    raw=path.read_bytes();value=json.loads(raw.decode('utf-8-sig'))
-    if (not isinstance(value,dict) or set(value)-{'username','credential_reference','credential_backend','secret_values_in_project'} or
-        value.get('credential_backend')!='rtime-credentials' or value.get('secret_values_in_project') is not False or
-        not isinstance(value.get('username'),str) or not re.fullmatch(r'[A-Za-z0-9_@.+-]{2,128}',value['username']) or
-        not isinstance(value.get('credential_reference'),str) or not value['credential_reference'].strip() or
-        value['credential_reference'].startswith('YOUR_') or value['username']=='ACCOUNT_ID'):
-        raise ValueError('invalid_credential_configuration')
-    return value,hashlib.sha256(raw).hexdigest()
+    from credential_provider import configuration as load
+    return load(path)
 
 
 def context(case_id,request_id,tab_id):
@@ -93,8 +87,9 @@ def use_credentials(case_id,request_id,tab_id,output):
     conf,digest=configuration()
     base.update(phase='credential_use_intent',config_sha256=digest,login_submitted=None)
     atomic_private(output,base,exclusive=True)
-    credential_cli=Path.home()/'.ai-skills/rtime-credentials/scripts/cli.py'
-    if not credential_cli.is_file():
+    from credential_provider import invocation
+    try:credential_command,environment=invocation(conf)
+    except ValueError:
         result={**base,'phase':'not_dispatched','state':'credential_tool_unavailable','login_submitted':False,'credential_accessed':False}
         atomic_private(output,result);return result
     consumer=[sys.executable,str(Path(__file__).resolve()),'consume','--case-id',case_id,'--request-id',request_id,
@@ -102,11 +97,9 @@ def use_credentials(case_id,request_id,tab_id,output):
     request={'bindings':{name:{'reference':conf['credential_reference'],'field':field} for name,field in
                          [('FINANCE_CAS_USERNAME','username'),('FINANCE_CAS_PASSWORD','password')]},
              'argv':consumer,'timeout':35}
-    environment={k:v for k,v in os.environ.items() if k not in ['FINANCE_CAS_USERNAME','FINANCE_CAS_PASSWORD']}
-    environment.update(PYTHONUTF8='1',PYTHONIOENCODING='utf-8')
     try:
         # 输入只有凭据引用与固定argv；输出原文不进入日志或回执。
-        completed=subprocess.run([sys.executable,str(credential_cli),'use'],input=json.dumps(request),
+        completed=subprocess.run(credential_command,input=json.dumps(request),
                                  text=True,encoding='utf-8',capture_output=True,env=environment,timeout=45)
         wrapped=json.loads(completed.stdout)
         tool_ok=completed.returncode==0 and isinstance(wrapped,dict) and wrapped.get('ok') is True

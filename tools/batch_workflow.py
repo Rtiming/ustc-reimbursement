@@ -190,15 +190,14 @@ def inspect_batch(service, scenario, batch_index, sequences=None, allow_incomple
                                            read_json(paths['case']).get('material_context',{}).get('native_reduction_receipts'))
                 except (ValueError,KeyError,TypeError,OSError) as error:
                     blocked.append('票面总额与核定额不同，须先有真实原生减报能力及逐票映射：'+str(error))
-            corporate = bool(form.get('payments')) and all(p.get('mode') == 'corporate_transfer' for p in form['payments'])
-            if any(p.get('mode') not in ['bank_transfer', 'corporate_transfer'] for p in form.get('payments', [])) or (
-                    any(p.get('mode') == 'corporate_transfer' for p in form.get('payments', [])) and not corporate):
-                blocked.append('批量填审只接全个人转卡或全对公转账，不支持混合支付')
+            corporate = any(p.get('mode') == 'corporate_transfer' for p in form.get('payments', []))
+            if any(p.get('mode') not in ['bank_transfer', 'corporate_transfer'] for p in form.get('payments', [])):
+                blocked.append('批量填审只支持个人转卡和对公转账及其混合')
             if corporate:
                 from validate_config import validate_corporate_payments
                 validate_corporate_payments(form['payments'], form['amount'])
                 allowed_sources = {source for sources in source_pages.values() for source in sources}
-                for payment in form['payments']:
+                for payment in [p for p in form['payments'] if p.get('mode')=='corporate_transfer']:
                     invoice_linked = False
                     for ref in payment['source_refs']:
                         bound = re.fullmatch(r'(.+)#sha256=([a-fA-F0-9]{64})&page=([1-9]\d*)', ref)
@@ -211,7 +210,7 @@ def inspect_batch(service, scenario, batch_index, sequences=None, allow_incomple
             def totals(payments, id_field):
                 values = {}
                 for payment in payments:
-                    key = (payment.get('mode'), payment.get('name')) if corporate else (payment.get('mode'), payment.get('name'), payment.get(id_field))
+                    key = (payment.get('mode'), payment.get('name')) if payment.get('mode')=='corporate_transfer' else (payment.get('mode'), payment.get('name'), payment.get(id_field))
                     if not all(key):
                         raise ValueError('收款人身份来源不完整')
                     values[key] = values.get(key, Decimal('0')) + Decimal(payment['amount'])
@@ -375,6 +374,16 @@ class DraftBatch:
     def fill_stage(self, case, stage):
         self.request(case, stage + '-plan', operation='stage', parameters={'stage':stage,'tab_id':self.tab})
         self.request(case, stage + '-write', operation='stage', parameters={'stage':stage,'tab_id':self.tab}, execute=True)
+        from finance_native_stage import STAGES as HTTP_STAGES, READ_DOMAINS
+        if stage in HTTP_STAGES:
+            _,paths=self.service.resolve(case)
+            form=read_json(paths['form'])
+            own_reader=stage=='categories'or stage in {'funding','expenses'}and form.get('budget_allocation_mode')=='system_default_single_funding'
+            receipt = self.request(case, stage + '-http-rb-' + str(time.time_ns()), method='business',
+                action=stage+'-prepare'if own_reader else'bill-read',**({}if own_reader else{'domain':READ_DOMAINS[stage]}),tab_id=self.tab,expected_userid=self.userid)
+            _, art = self.artifact(case, receipt)
+            self.ack(case, receipt, art, '固定HTTP保存后独立回读；全部原字段及目标字段由原写入合同逐项核对。')
+            return
         receipt, data, frame, art = self.readback(case, stage)
         form = self.verify_stage(case, stage, frame)
         self.ack(case, receipt, art, '参数式批量办理独立回读：' + stage + '同号' + form['serial'] + '身份、目标字段及金额与本案参数一致；未执行本人同意、审批或付款。')
@@ -737,6 +746,15 @@ def run_batch(service, *, scenario, batch_index, phase='status', sequences=None,
         if stage not in ['basic', 'funding', 'expenses', 'payments', 'audit', 'options']:
             raise APIError('batch_recovery_action', '此原写入须使用其专用恢复入口，批次不重放或猜测结果')
         runner = DraftBatch(service, path, scenario, tab_id, expected_userid)
+        if pending.get('verification',{}).get('schema') == 'ustc-native-stage-v1':
+            from finance_native_stage import READ_DOMAINS
+            receipt = runner.request(case, 'recover-http-' + str(time.time_ns()), method='business',
+                action='bill-read',domain=READ_DOMAINS[stage],tab_id=tab_id,expected_userid=expected_userid)
+            _, art = runner.artifact(case, receipt)
+            runner.ack(case,receipt,art,'恢复原意图：完整独立HTTP回读核对全部目标和未改字段；未重放保存。')
+            return {**result,'local_record_updated':True,'state':'original_saved_independently_verified',
+                    'results':[{'case_id':case,'serial':item['serial'],'recovered_stage':stage,
+                                'readback_job_id':receipt['job_id'],'replayed':False}], 'receipt_root':str(runner.folder)}
         receipt, data, frame, art = runner.readback(case, 'recover-' + stage)
         if stage in ['audit', 'options']:
             for part in ['basic', 'funding', 'payments']:
