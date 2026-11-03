@@ -2,6 +2,7 @@
 import copy
 import json
 import sys
+from contextlib import nullcontext
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -26,6 +27,7 @@ def inventory(new=False,namespace='namespace'):
 
 class NativeInterfaceTests(unittest.TestCase):
     def setUp(self):
+        guard=patch('edge_runtime.browser_lock',nullcontext);guard.start();self.addCleanup(guard.stop)
         tmp=tempfile.TemporaryDirectory();self.addCleanup(tmp.cleanup);self.root=Path(tmp.name).resolve()
         lock=patch('edge_runtime.LOCK_PATH',self.root/'fixture-browser.lock');lock.start();self.addCleanup(lock.stop)
         p=patch('finance_session.SESSIONS',self.root/'sessions');p.start();self.addCleanup(p.stop)
@@ -144,6 +146,7 @@ class BackendReentryTests(unittest.TestCase):
         self.assertEqual(ensure.call_count,1);self.assertEqual(read_json(Path(self.session.state['backend_reentry_receipt']))['phase'],'reentry_incomplete')
 
     def setUp(self):
+        guard=patch('edge_runtime.browser_lock',nullcontext);guard.start();self.addCleanup(guard.stop)
         tmp=tempfile.TemporaryDirectory();self.addCleanup(tmp.cleanup);self.root=Path(tmp.name).resolve()
         lock=patch('edge_runtime.LOCK_PATH',self.root/'fixture-browser.lock');lock.start();self.addCleanup(lock.stop)
         index=self.root/'index.json';atomic_json(index,{'documents':[{'case_id':'fixture'}]})

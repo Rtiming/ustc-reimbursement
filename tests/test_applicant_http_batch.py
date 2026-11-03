@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import patch
 import sys
+from contextlib import nullcontext
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
 import applicant_http_batch as batch
 
@@ -25,6 +26,7 @@ class FakeService:
 
 class ApplicantHttpBatchTests(unittest.TestCase):
     def setUp(self):
+        guard=patch('edge_runtime.browser_lock',nullcontext);guard.start();self.addCleanup(guard.stop)
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup);self.root=Path(self.temp.name);self.s=FakeService(self.root)
         self.c={'workspace':str(self.root),'material_roots':[str(self.root)],'manifest':{'path':str(self.root/'manifest.json'),'sha256':'a'*64},'case_id':'fixture','tab_id':'99','execute':True,'request_id':'fixture-batch'}
         self.value={'show_verification_interface':False,'cases':[{'case_id':'fixture','serial':'123','plan':{'serial':'123'}}]}

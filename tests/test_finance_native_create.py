@@ -3,6 +3,7 @@ import copy
 import json
 from pathlib import Path
 import sys
+from contextlib import nullcontext
 import unittest
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
@@ -18,6 +19,7 @@ class NativeCreateTests(unittest.TestCase):
     plan=selected_fixture.NativeSelectionTests.plan
 
     def setUp(self):
+        guard=patch('edge_runtime.browser_lock',nullcontext);guard.start();self.addCleanup(guard.stop)
         selected_fixture.NativeSelectionTests.setUp(self)
         lock=patch('edge_runtime.LOCK_PATH',self.root/'fixture-browser.lock');lock.start();self.addCleanup(lock.stop)
         f=read_json(self.paths['form']);f['expected_userid']='TEST001';atomic_json(self.paths['form'],f)
