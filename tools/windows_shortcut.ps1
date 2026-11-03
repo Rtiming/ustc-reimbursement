@@ -22,6 +22,7 @@ try {
     Add-Type -TypeDefinition @'
 using System;
 using System.Text;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
 [ComImport, Guid("000214F9-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -57,16 +58,20 @@ public static class UstcShortcut {
         return Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid("00021401-0000-0000-C000-000000000046")));
     }
     public static void Create(string path, string target, string args, string directory, string description) {
-        object obj = NewLink();
+        string temporary = Path.Combine(Path.GetDirectoryName(path), ".ustc-link-" + Guid.NewGuid().ToString("N") + ".lnk");
         try {
-            UstcShellLinkW link = (UstcShellLinkW)obj;
-            link.SetPath(target);
-            link.SetArguments(args);
-            link.SetWorkingDirectory(directory);
-            link.SetDescription(description);
-            link.SetShowCmd(7);
-            ((IPersistFile)obj).Save(path, true);
-        } finally { Marshal.FinalReleaseComObject(obj); }
+            object obj = NewLink();
+            try {
+                UstcShellLinkW link = (UstcShellLinkW)obj;
+                link.SetPath(target);
+                link.SetArguments(args);
+                link.SetWorkingDirectory(directory);
+                link.SetDescription(description);
+                link.SetShowCmd(7);
+                ((IPersistFile)obj).Save(temporary, true);
+            } finally { Marshal.FinalReleaseComObject(obj); }
+            File.Move(temporary, path); // Two-argument Move never overwrites an existing entry.
+        } finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
     public static UstcShortcutView Read(string path) {
         object obj = NewLink();
