@@ -1,0 +1,51 @@
+{
+  "schema": "ustc-native-draft-cancel-contract-v1",
+  "definition_sha256": "c31426ce3775d58f07f9019184341b7463f834b896e0930fe154f4e1016798d8",
+  "button": {
+    "btnguid": "74757E3026744EBAA6BC01CA54EA4256",
+    "caption": "撤销报销单",
+    "captionTag": "",
+    "icon": "",
+    "width": 96,
+    "height": 20,
+    "pre_compute": false,
+    "pre_check": true,
+    "call_proc": true,
+    "check_func": "`$6ae051631e9349b972f6a714f3d0ede1:#101-MultiRows#;#101-MultiCount#;#0-userinfo.userid#",
+    "procs": [
+      "`$c5c7fa2edcead388986a318a62c69d91:#101-MultiRows#;#101-MultiCount#;#0-userinfo.username#;#0-userinfo.userid#"
+    ],
+    "post_check": true,
+    "acts": "",
+    "affects": "",
+    "jscontent": "",
+    "clickquery": true,
+    "clickqueryhint": "#61-cxbx_tip_state#",
+    "autojump": false,
+    "btn_type": "normal",
+    "user_btn_ico": "",
+    "hasIntf_beforeclick": false,
+    "hasIntf_afterclick": false,
+    "btn_top": "false",
+    "btn_bottom": "true",
+    "btn_left": "false",
+    "btn_title": "false",
+    "sign_enabled": false,
+    "hint": "",
+    "btn_roles": "",
+    "customFunc": "",
+    "numSql": "",
+    "btnAlign": "left",
+    "wfsignenabled": false,
+    "wfsignstyle": "custom",
+    "wfsignstylevar": "",
+    "customCSS": "",
+    "btnOptions": {
+      "allowPushToPageHeader": "Y",
+      "allowFold": "Y",
+      "visibleJSCond": "1==1",
+      "asyncExecute": "N",
+      "btnOrderVariant": ""
+    }
+  }
+}

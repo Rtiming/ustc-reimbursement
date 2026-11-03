@@ -1,4 +1,4 @@
-"""原生列表导出：冻结单号范围、填写导出选项、等待本次唯一下载并归档。"""
+"""原生HTTP列表导出：冻结来源、完整集合/单元格核验及原件归档。"""
 
 from __future__ import annotations
 import hashlib
@@ -62,8 +62,8 @@ def run_grid_export(service, case_id, cfg, index, auth, *, execute=False, progre
         raise APIError('grid_export_scope', '原生导出范围为空或重复')
     output = Path(plan['output_root']).resolve()
     downloads = Path(plan['download_directory']).resolve()
-    if not any(output.is_relative_to(r) for r in service.material_roots) or not downloads.is_dir():
-        raise APIError('grid_export_paths', '输出根或本机下载目录不可用')
+    if not any(output.is_relative_to(r) for r in service.material_roots):
+        raise APIError('grid_export_paths', '输出根不在授权资料目录')
     if not execute:
         return {
             'ok': True,
@@ -112,95 +112,12 @@ def run_grid_export(service, case_id, cfg, index, auth, *, execute=False, progre
             )
             atomic_json(report_path, report)
             return report
-        if state['phase'] not in ('new', 'menu_requested', 'download_requested'):
-            raise APIError('grid_export_original_task', '原导出窗口尚未确认，保留原job和窗口')
-        if state['phase'] == 'new':
-            if list(downloads.glob(state['title'] + '*')):
-                raise APIError('grid_export_title_conflict', '本次下载文件名已经存在')
-            case = cases[0]['case_id']
-            session.begin_case(case)
-            session.job(
-                case,
-                'invoice_verification',
-                {
-                    'action': 'view',
-                    'view': 'in-progress',
-                    'expected_userid': userid,
-                    'tab_id': session.state['tab_id'],
-                },
-                'grid-export-scope',
-            )
-            session.job(
-                case,
-                'invoice_verification',
-                {
-                    'action': 'full-grid',
-                    'grid': '101',
-                    'expected_userid': userid,
-                    'tab_id': session.state['tab_id'],
-                },
-                'grid-export-list-ready',
-            )
-            form = read_json(service.resolve(case)[1]['form'])
-            submission_plan = view_plan(form, userid, plan['source'])
-            submission_plan['grid_export'] = {
-                'title': state['title'],
-                'format': plan['format'],
-                'serials': serials,
-            }
-            state.update(
-                phase='menu_requested',
-                case_id=case,
-                started_at=time.time(),
-                submission_plan=submission_plan,
-            )
-            atomic_json(state_path, state)
-        elif state['phase'] == 'menu_requested':
-            # 重用原menu请求号及原页；后台任务层决定是否已执行，不另开导出窗口。
-            session.ensure(preserve_original=True)
-            if session.state.get('last_case_id') != state['case_id']:
-                raise APIError('grid_export_original_page', '原列表导出与登记工作页不符')
-        if state['phase'] == 'menu_requested':
-            case = state['case_id']
-            submission_plan = state['submission_plan']
-
-            def menu_enqueued(queued):
-                state['menu_job_id'] = queued['job_id']
-                atomic_json(state_path, state)
-
-            session.job(
-                case,
-                'submission',
-                {
-                    'action': 'grid-export-menu',
-                    'plan': submission_plan,
-                    'tab_id': session.state['tab_id'],
-                },
-                'grid-export-menu',
-                True,
-                request_id='grid-export-' + key + '-menu',
-                on_enqueued=menu_enqueued,
-            )
-            state['phase'] = 'download_requested'
-            atomic_json(state_path, state)
-
-            def queued_receipt(queued):
-                state['download_job_id'] = queued['job_id']
-                atomic_json(state_path, state)
-
-            session.job(
-                case,
-                'submission',
-                {
-                    'action': 'grid-export-execute',
-                    'plan': submission_plan,
-                    'tab_id': session.state['tab_id'],
-                },
-                'grid-export-execute',
-                True,
-                request_id='grid-export-' + key + '-execute',
-                on_enqueued=queued_receipt,
-            )
+        if state['phase'] in ('new', 'http_source_requested', 'http_export_requested'):
+            return run_native_export(service, case_id, cfg, session, folder, key, state,
+                                     state_path, report_path, report, output, states)
+        if state['phase'] != 'download_requested':
+            raise APIError('grid_export_original_task', '原导出菜单结果尚未确认；保留原job和窗口，不重复派发或改走新导出')
+        # 旧下载只继续收取原文件；不重新打开菜单或执行旧控件动作。
         deadline = time.monotonic() + 60
         last = None
         stable = 0
@@ -261,4 +178,62 @@ def run_grid_export(service, case_id, cfg, index, auth, *, execute=False, progre
             },
         )
     atomic_json(report_path, report)
+    return report
+
+
+def run_native_export(service, case_id, cfg, session, folder, key, state,
+                      state_path, report_path, report, output, states):
+    """只恢复原稳定请求；原始列表和导出均留在同案job目录。"""
+    if report['format'] not in {'EXCEL', 'PDF'}:
+        raise APIError('grid_export_format_pending', 'DBF尚无逐单元格消费者，未发起原生导出')
+    session.ensure(preserve_original=state['phase'] != 'new')
+    def receipt(name):
+        def queued(job):
+            prior=state.get(name)
+            if prior and prior!=job['job_id']:
+                raise APIError('grid_export_original_job', '稳定导出请求号对应的原job变化')
+            state[name]=job['job_id'];atomic_json(state_path,state)
+        return queued
+    if state['phase'] in {'new','http_source_requested'}:
+        state['phase']='http_source_requested';atomic_json(state_path,state)
+        job,body=session.job(case_id,'business',{'action':'bills-list',
+            'expected_userid':cfg['expected_userid'],'tab_id':session.state['tab_id']},
+            'native-grid-source',request_id='grid-export-'+key+'-http-source',
+            on_enqueued=receipt('source_job_id'))
+        if body.get('ok')is not True or body.get('complete')is not True:
+            raise APIError('grid_export_source_incomplete','原清单尚未完整读取')
+        state['phase']='http_export_requested';atomic_json(state_path,state)
+    job,body=session.job(case_id,'business',{'action':'bills-export',
+        'source_job_id':state['source_job_id'],'expected_userid':cfg['expected_userid'],
+        'tab_id':session.state['tab_id']},'native-grid-export',
+        request_id='grid-export-'+key+'-http-file',on_enqueued=receipt('export_job_id'))
+    if (body.get('ok')is not True or body.get('complete')is not True or
+            body.get('state')!='native_grid_export_verified' or body.get('format')!=report['format']
+            or body.get('verification',{}).get('records')!=report['rows']
+            or body.get('verification',{}).get('all_serials_and_values_match')is not True):
+        raise APIError('grid_export_unverified','原生导出未完成全部单号及单元格核验')
+    source=Path(body['file']);root=service.job_folder(case_id,job['job_id']).resolve()
+    from material_intake import reject_links
+    reject_links(source)
+    if not source.is_absolute() or not source.resolve().is_relative_to(root):
+        raise APIError('grid_export_file_origin','原生导出文件不属于原job')
+    raw=source.read_bytes();digest=hashlib.sha256(raw).hexdigest()
+    if digest!=body['sha256']:
+        raise APIError('grid_export_file_changed','原生导出文件SHA改变')
+    destination=output/('快照_'+key)/('系统原生报销单列表'+source.suffix.lower())
+    destination.parent.mkdir(parents=True,exist_ok=True)
+    if destination.exists():
+        reject_links(destination)
+        if destination.read_bytes()!=raw:raise APIError('grid_export_existing_changed','原生导出目标已改变')
+    else:_atomic_new(destination,raw)
+    state.update(phase='completed',output=str(destination),sha256=digest,
+        native_export_job_id=job['job_id'],verification=body['verification'],business_transport='native_http')
+    atomic_json(state_path,state)
+    report.update(ok=True,state='completed',output=str(destination),sha256=digest,
+        source_job_id=state['source_job_id'],export_job_id=job['job_id'],
+        business_transport='native_http',verification=body['verification'],original_bytes_preserved=True)
+    atomic_json(output/'当前列表导出.json',{'output':str(destination),'sha256':digest,
+        'report_path':str(report_path),'source_states':states,'source_job_id':state['source_job_id'],
+        'export_job_id':job['job_id'],'verification':body['verification']})
+    atomic_json(report_path,report)
     return report

@@ -33,6 +33,18 @@ async def wait_job(client, case_id, job_id):
     raise AssertionError('演示任务超时')
 
 
+def synthetic_activity_values():
+    from activity_form import TEXT_FIELDS
+    values = {name: 'Synthetic' for name in TEXT_FIELDS}
+    values.update(template_id='ustc_activity_20260414', leader_id='SYN01',
+                  leader_phone='00000000000', leader_email='synthetic@example.invalid',
+                  application_date='2026-11-03', start_date='2026-11-04', end_date='2026-11-04',
+                  participant_count=1, off_campus=False,
+                  budget_items=[{'name':'Synthetic materials','amount':'10.00'}],
+                  self_funded='0.00', requested_support='10.00')
+    return values
+
+
 async def main(render=False, write_catalog=False, output=None):
     # 干净源码检出也应可验收，不读取任何真实案件作为前置条件或测试夹具。
     with tempfile.TemporaryDirectory(prefix='reimbursement-mcp-acceptance-') as temp:
@@ -52,6 +64,12 @@ async def main(render=False, write_catalog=False, output=None):
             entry = payload(await client.call_tool('reimbursement_capabilities', {'intent':'materials'}))
             assert entry['system_write'] is False and entry['platform']['page_script_executed'] is False
             assert entry['next_action']['tool'] == 'reimbursement_guide'
+            review_entry = payload(await client.call_tool('reimbursement_capabilities', {'intent':'review'}))
+            assert review_entry['next_action']['tool']=='reimbursement_material_review'
+            review_list = payload(await client.call_tool('reimbursement_material_review', {'action':'list'}))
+            assert review_list['workspaces']==[] and review_list['system_write'] is False
+            review_guide = payload(await client.call_tool('reimbursement_guide', {'topic':'review'}))
+            assert 'waiting_materials' in review_guide['text']
             quickstart = payload(await client.call_tool('reimbursement_guide', {'topic':'quickstart'}))
             assert quickstart['system_write'] is False and 'prepare_batch_file' in quickstart['text']
             for topic in ('intake', 'planning', 'export', 'windows'):
@@ -71,7 +89,8 @@ async def main(render=False, write_catalog=False, output=None):
             assert standards['text'] == (PROJECT/'skills/ustc-reimbursement/references/standards-system.md').read_text(encoding='utf-8')
             checked = payload(await client.call_tool('reimbursement_check', {'case_id': 'demo_mcp'}))
             assert not checked['ok']
-            values = read_json(PROJECT/'templates/activity_approval/input_demo.json')
+            demo = PROJECT/'templates/activity_approval/input_demo.json'
+            values = read_json(demo) if demo.is_file() else synthetic_activity_values()
             a = payload(await client.call_tool('reimbursement_activity', {'case_id': 'demo_mcp', 'values': values, 'request_id': 'activity-01', 'check_only': not render}))
             b = payload(await client.call_tool('reimbursement_activity', {'case_id': 'demo_mcp', 'values': values, 'request_id': 'activity-01', 'check_only': not render}))
             assert a['job_id']==b['job_id'] and b['reused_existing_job']
@@ -84,7 +103,7 @@ async def main(render=False, write_catalog=False, output=None):
                 detail = payload(await client.call_tool('reimbursement_result', {'case_id': 'demo_mcp', 'job_id': render_job['job_id'], 'artifact_id': rr['artifact_id']}))
                 assert detail['artifact']['page_count']>=1 and not detail['artifact']['visual_review_completed']
             # 启动本地任务后主动关闭MCP连接，独立worker仍应完成。
-            detached = payload(await client.call_tool('reimbursement_activity', {'case_id': 'demo_mcp', 'values': values, 'request_id': 'detached-01'}))
+            detached = payload(await client.call_tool('reimbursement_activity', {'case_id': 'demo_mcp', 'values': values, 'request_id': 'detached-01', 'check_only': not render}))
         service = AssistantService(temp, [temp], sys.executable)
         deadline = time.monotonic()+20
         while time.monotonic()<deadline:

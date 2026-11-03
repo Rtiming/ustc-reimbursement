@@ -2,15 +2,11 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
-import subprocess
 import time
 from pathlib import Path
 
 from assistant_api import AssistantService, APIError, atomic_json, read_json
-from batch_workflow import DraftBatch, verify_invoice_scope
-from finance_category_verify import category_rows
 from registered_session import RegisteredSession
 from registered_inputs import load_definition
 from edge_runtime import file_lock
@@ -41,34 +37,11 @@ def run(service, case_id, sequences, execute=False):
             if form.get('review', {}).get('workflow_started'):
                 result['results'].append({'case_id':case,'sequence':row['index'],'state':'workflow_exists_not_edited'})
                 continue
-            tab = session.begin_case(case)
-            job, data = session.job(case, 'read_system', {'mode':'open-draft', 'serial':form['serial'],
-                'expected_userid':cfg['expected_userid'], 'tab_id':tab}, 'categories-original')
-            frames = [f for f in data.get('frames',[]) if f.get('id') == 'iframepage_print']
-            if len(frames) != 1 or data.get('serial') != form['serial'] or data.get('identity',{}).get('userid') != cfg['expected_userid']:
-                raise APIError('category_identity', '当前原单或账号未核实')
-            frame = frames[0]; verify_invoice_scope(form, read_json(paths['invoices']), frame)
-            runner = DraftBatch(service,index,cfg['scenario'],tab,cfg['expected_userid'])
-            for stage in ['basic','funding','payments']:runner.verify_stage(case,stage,frame)
-            item = {'case_id':case, 'sequence':row['index'], 'serial':form['serial'], 'preview_job_id':job['job_id'],
-                    'state':'candidates_observed_not_selected', 'groups':[]}
-            folder = out/case; folder.mkdir()
-            for number, current in enumerate(category_rows(frame)):
-                observed = None
-                for action in ['invoice-group-open','invoice-group-inspect','invoice-group-close']:
-                    target = folder/(str(number)+'-'+action+'.json')
-                    command = [service.python,str(service.root/'tools/finance_cli.py'),action,'--case',str(paths['form']),
-                               '--tab-id',tab,'--output',str(target)]
-                    if action == 'invoice-group-open':command += ['--group',current['group']]
-                    process = subprocess.run(command,capture_output=True,text=True,timeout=150)
-                    if process.returncode:
-                        raise APIError('category_read_failed', '原分类读取未完成；不选择、不保存，查看 '+str(target))
-                    if action == 'invoice-group-inspect':
-                        native = read_json(target)
-                        while isinstance(native.get('result'),dict):native=native['result']
-                        observed = {'path':str(target),'sha256':hashlib.sha256(target.read_bytes()).hexdigest(),
-                                    'candidates':[r['row'] for r in native['rows']]}
-                item['groups'].append({'current':current,'native_candidates':observed})
+            tab=session.state['tab_id']
+            job,data=session.job(case,'business',{'action':'category-candidates','expected_userid':cfg['expected_userid'],'tab_id':tab},'categories-native-http')
+            if(data.get('complete')is not True or data.get('case_id')!=case or data.get('serial')!=form['serial']or data.get('expected_userid')!=cfg['expected_userid']or data.get('system_write')is not False):raise APIError('category_identity','须同案完整HTTP原生分类候选')
+            art=next(a for a in job['artifacts']if a['name']=='output.json')
+            item={'case_id':case,'sequence':row['index'],'serial':form['serial'],'preview_job_id':job['job_id'],'state':'candidates_observed_not_selected','business_transport':'native_http','groups':data['groups'],'source':{'job_id':job['job_id'],'artifact_id':art['artifact_id'],'sha256':art['sha256']}}
             result['results'].append(item); atomic_json(out/'report.json',result)
             print(json.dumps({'sequence':row['index'],'state':item['state'],'groups':len(item['groups'])},ensure_ascii=False),flush=True)
     return result

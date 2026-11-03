@@ -62,6 +62,7 @@ export async function renderChecklist(options) {
     const keys = s.columns.map(c => c.key);
     if (!keys.length || new Set(keys).size !== keys.length) throw new Error('表格列为空或重复');
     for (const c of s.columns) if (!['text','money','number'].includes(c.type)) throw new Error('字段类型不合法');
+    if (s.rowHeight !== undefined && (!Number.isFinite(s.rowHeight) || s.rowHeight < 24 || s.rowHeight > 409)) throw new Error('清单行高须为24至409');
     for (const r of s.rows) if (Object.keys(r).length !== keys.length || keys.some(k => !(k in r))) throw new Error('行字段与表头不符');
   }
   if (!plan.sources?.length) throw new Error('缺来源SHA');
@@ -111,7 +112,7 @@ export async function renderChecklist(options) {
     }
     if (values.length) {
       const body=sheet.getRange(`A${headerRow+1}:${end}${headerRow+values.length}`);
-      body.format.rowHeight=56;
+      body.format.rowHeight=spec.rowHeight ?? 56;
       body.format.autofitRows();
       if (spec.name === '问题总结') {
         for (const [i,row] of spec.rows.entries()) {

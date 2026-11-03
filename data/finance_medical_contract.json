@@ -1,0 +1,9 @@
+{
+  "schema": "ustc-medical-http-contract-v1",
+  "winno": "288",
+  "funcno": "1360",
+  "save_winno": "1159",
+  "save_button": "9EBDF997C5B84DBFA9D759C37D6391A5",
+  "definition_sha256": "eef5b6cf82e4d6ad7dfa19f5f2cf76dbe8d3299dbfbae857d981227518d482cb",
+  "bindSql": "$600c266a24f49aadf3e31a2f8bfca416|#61-tks_guid#,#0-userinfo.userid#,#61-picture_seq#,#395-T.INV_TYPE#"
+}

@@ -191,6 +191,13 @@ def commands(suite, python):
     return steps
 
 
+def step_timeout(value):
+    seconds = int(value)
+    if not 1 <= seconds <= 3600:
+        raise argparse.ArgumentTypeError('单步限时须为1至3600秒')
+    return seconds
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--suite', choices=['core', 'all'], default='all')
@@ -198,17 +205,18 @@ def main():
     parser.add_argument('--output-dir', type=Path, help='新建结果目录，不覆盖历史验证')
     parser.add_argument('--plan', action='store_true', help='只列命令，不执行')
     parser.add_argument('--keep-going', action='store_true', help='离线诊断时失败后继续独立检查；最终仍返回失败')
+    parser.add_argument('--step-timeout', type=step_timeout, default=300, help='每组检查秒数，默认300；完整Python套件已超过2000项')
     args = parser.parse_args()
     local = ROOT/'.local/mcp-venv'/('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
     python = str(Path(args.python).expanduser().absolute()) if args.python else str(local if local.exists() else Path(sys.executable))
     todo = commands(args.suite, python)
     if args.plan:
-        print(json.dumps({'suite': args.suite, 'python': python, 'commands': todo, 'browser_access': False}, ensure_ascii=False))
+        print(json.dumps({'suite': args.suite, 'python': python, 'commands': todo, 'step_timeout': args.step_timeout, 'browser_access': False}, ensure_ascii=False))
         return 0
     output = (args.output_dir or ROOT/'.local/checks'/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'-'+uuid.uuid4().hex[:8])).resolve()
     output.mkdir(parents=True, exist_ok=False)
     result = {'schema': 'reimbursement-project-check-v1', 'suite': args.suite, 'python': python,
-              'browser_access': False, 'keep_going': args.keep_going,
+              'browser_access': False, 'keep_going': args.keep_going, 'step_timeout': args.step_timeout,
               'created_at_utc': datetime.now(timezone.utc).isoformat(), 'checks': []}
     env = dict(os.environ)
     env['PYTHONUTF8'] = '1'
@@ -219,7 +227,7 @@ def main():
         log = output/(name+'.log')
         live_log = output/(name+'.live.log')
         with live_log.open('w', encoding='utf-8') as stream:
-            step = run_step(command, stream, cwd=ROOT, env=env)
+            step = run_step(command, stream, cwd=ROOT, env=env, timeout=args.step_timeout)
             code = step['exit_code']
         if step['cleanup']['ok']:
             # 复制到新inode；遗漏的继承句柄只能改live日志，不能改关闭快照。

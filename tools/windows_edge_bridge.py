@@ -63,7 +63,7 @@ RESCUE_OPERATIONS = frozenset({'ping', 'tab-close', 'reload', 'page-read'})
 
 def request(operation, arguments=None, *, timeout=20, state=None, request_id=None):
     if operation not in {'inventory', 'evaluate', 'validate-tab', 'create-page', 'tab-origin', 'smoke',
-                         'ping', 'tab-close', 'reload', 'page-read','create-finance-window','wake-finance-tab','relocate-finance-tab','show-verification'}:
+                         'ping', 'tab-close', 'reload', 'page-read','create-finance-window','wake-finance-tab','relocate-finance-tab','show-verification','show-approver-verification'}:
         raise ValueError('未支持的Windows财务桥操作')
     if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or not 0 < timeout <= 20:
         raise ValueError('单次传输timeout须为0至20秒之间的有限正数')
@@ -129,8 +129,14 @@ def evaluate(source, tab_id=None, *, timeout=20, access=False):
         return native_evaluate(source, tab_id, timeout=timeout, access=access, **native_target())
     if tab_id is not None and (not isinstance(tab_id, (str, int)) or not str(tab_id).isdigit()):
         raise ValueError('须明确合法数字标签ID')
-    result = request('evaluate', {'tab_id': str(tab_id) if tab_id is not None else None,
-                                 'source': source, 'scope': 'access' if access else 'finance'}, timeout=timeout)
+    arguments = {'tab_id': str(tab_id) if tab_id is not None else None,
+                 'source': source, 'scope': 'access' if access else 'finance'}
+    if os.environ.get('REIMBURSEMENT_EDGE_TAB_NAMESPACE'):
+        from registered_bridge import target_binding
+        current, target = target_binding(tab_id, os.environ['REIMBURSEMENT_EDGE_TAB_NAMESPACE'],
+                                         os.environ.get('REIMBURSEMENT_EDGE_WINDOW_ID'))
+        arguments.update(target, expected_epoch=current['epoch'])
+    result = request('evaluate', arguments, timeout=timeout)
     if not isinstance(result, str):
         raise BridgeUnavailable('Windows财务桥返回值不是原生字符串')
     return result
@@ -144,8 +150,10 @@ def list_tabs(*, access=False):
 def validate_tab(tab_id, foreground=False):
     if foreground:
         raise BridgeUnavailable('既有标签常规校验不切前台；开页和PDF导出须走各自明确授权的开关')
+    arguments = {'tab_id': str(tab_id)}
     if os.environ.get('REIMBURSEMENT_EDGE_TAB_NAMESPACE'):
-        from native_finance_bridge import validate_tab as native_validate
-        from finance_backend import native_target
-        return native_validate(tab_id, **native_target())
-    return request('validate-tab', {'tab_id': str(tab_id)})
+        from registered_bridge import target_binding
+        current, target = target_binding(tab_id, os.environ['REIMBURSEMENT_EDGE_TAB_NAMESPACE'],
+                                         os.environ.get('REIMBURSEMENT_EDGE_WINDOW_ID'))
+        arguments.update(target, expected_epoch=current['epoch'])
+    return request('validate-tab', arguments)

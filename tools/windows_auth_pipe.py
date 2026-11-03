@@ -147,10 +147,12 @@ class AuthPipeServer:
             finally:
                 if isinstance(packet,dict): packet.clear()
                 self.api.DisconnectNamedPipe(handle)
-                self.api.CloseHandle(handle);self.handle=None
             if not self.running: break
-            try: self._create()
-            except PipeError: break
+            # Keep the verified instance alive between clients; recreating its name races the next connection.
+            # https://learn.microsoft.com/en-us/windows/win32/api/namedpipeapi/nf-namedpipeapi-connectnamedpipe
+            self.private_acl = self._read_private_acl()
+            if not self.private_acl: break
+            self.ready = True
         self.ready=False
         if self.handle:
             self.api.CloseHandle(self.handle);self.handle=None
@@ -175,10 +177,48 @@ class AuthPipeServer:
         self.adv.GetKernelObjectSecurity(self.handle,4,None,0,ctypes.byref(size))
         buf=ctypes.create_string_buffer(size.value)
         if not self.adv.GetKernelObjectSecurity(self.handle,4,buf,size,ctypes.byref(size)): return False
-        text=wt.LPWSTR()
-        if not self.adv.ConvertSecurityDescriptorToStringSecurityDescriptorW(buf,1,4,ctypes.byref(text),None): return False
-        try:
-            import re
-            aces=re.findall(r'\(A;;(?:GA|FA);;;([^;)]+)\)',text.value)
-            return text.value.startswith('D:P') and len(aces)==3 and set(aces)=={current_user_sid(),'SY','BA'} and text.value.count('(')==3
-        finally:self.kernel.LocalFree(text)
+        # Read canonical SIDs and masks; Windows may serialize the same ACE as an alias or hex rights.
+        # https://learn.microsoft.com/en-us/windows/win32/ipc/named-pipe-security-and-access-rights
+        control, revision = wt.WORD(), wt.DWORD()
+        if not self.adv.GetSecurityDescriptorControl(buf, ctypes.byref(control), ctypes.byref(revision)):
+            return False
+        present, defaulted, acl = wt.BOOL(), wt.BOOL(), ctypes.c_void_p()
+        if not self.adv.GetSecurityDescriptorDacl(buf, ctypes.byref(present), ctypes.byref(acl), ctypes.byref(defaulted)):
+            return False
+        if not present.value or not acl.value:
+            return False
+
+        class AclSize(ctypes.Structure):
+            _fields_ = [('count', wt.DWORD), ('used', wt.DWORD), ('free', wt.DWORD)]
+
+        class AllowedAce(ctypes.Structure):
+            _fields_ = [('type', wt.BYTE), ('flags', wt.BYTE), ('size', wt.WORD),
+                        ('mask', wt.DWORD), ('sid_start', wt.DWORD)]
+
+        info = AclSize()
+        if not self.adv.GetAclInformation(acl, ctypes.byref(info), ctypes.sizeof(info), 2) or info.count != 3:
+            return False
+        entries = []
+        for index in range(info.count):
+            pointer = ctypes.c_void_p()
+            if not self.adv.GetAce(acl, index, ctypes.byref(pointer)):
+                return False
+            ace = ctypes.cast(pointer, ctypes.POINTER(AllowedAce)).contents
+            if ace.type != 0 or ace.size < 20:
+                return False
+            sid = wt.LPWSTR()
+            if not self.adv.ConvertSidToStringSidW(ctypes.c_void_p(pointer.value + AllowedAce.sid_start.offset), ctypes.byref(sid)):
+                return False
+            try:
+                entries.append((ace.type, ace.flags, ace.mask, sid.value))
+            finally:
+                self.kernel.LocalFree(sid)
+        return private_pipe_acl_matches(control.value, entries, current_user_sid())
+
+
+def private_pipe_acl_matches(control, entries, user_sid):
+    expected = {user_sid, 'S-1-5-18', 'S-1-5-32-544'}
+    return (bool(control & 0x1000) and len(entries) == 3 and len(expected) == 3
+            and {row[3] for row in entries} == expected
+            and all(kind == 0 and flags == 0 and mask in {0x10000000, 0x1f01ff}
+                    for kind, flags, mask, sid in entries))

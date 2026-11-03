@@ -30,13 +30,13 @@ if str(PROJECT) not in sys.path: sys.path.insert(0, str(PROJECT))
 # 只折叠各入口已声明的默认值；目标、顺序、execute和非默认值仍属于不同意图。
 REQUEST_DEFAULTS = {
     'check': {'hashes': True}, 'scan': {'invoices': True},
-    'stage': {'tab_id': None},
+    'stage': {'tab_id': None,'noop_only':False},
     'invoice': {'start': 0, 'count': 10, 'tab_id': None},
     'read_system': {'mode': 'readback', 'job_id': None, 'artifact_id': None},
     'record_result': {'serial': None, 'outcome': None, 'note': ''},
     'activity': {'check_only': True, 'allow_incomplete': False},
     'correction': {'tab_id': None, 'group': '', 'key': '', 'kind': '', 'job_id': None, 'artifact_id': None},
-    'submission': {'tab_id': None},
+    'submission': {'tab_id': None,'job_id':None,'artifact_id':None},
     'access': {'tab_id': None, 'action': None, 'job_id': None, 'artifact_id': None},
     'invoice_verification': dict.fromkeys(['invoice_numbers', 'view', 'job_id', 'artifact_id', 'operation_key', 'grid', 'expected_userid']),
     'invoice_sources': {'invoice_numbers': None},
@@ -59,8 +59,7 @@ def canonical_request(operation, parameters, execute):
                   if key not in defaults or type(value) is not type(defaults[key]) or value != defaults[key]}
     if operation == 'access' and normalized.get('action') == ('ensure' if execute else 'check'):
         normalized.pop('action')
-    if operation == 'access' and normalized.get('action') == 'new-interface' and normalized.get('silent') is True:
-        normalized.pop('silent')
+    # full_control的缺省值随案件变化；显式silent=true不能在归一化时丢失。
     return {'operation': operation, 'parameters': normalized, 'execute': execute}
 
 
@@ -77,11 +76,19 @@ def atomic_json(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name+'.'+uuid.uuid4().hex+'.tmp')
     try:
-        with tmp.open('x', encoding='utf-8') as stream:
+        with tmp.open('x', encoding='utf-8', newline='\n') as stream:
             private_path(tmp)
             json.dump(data, stream, ensure_ascii=False, indent=2)
             stream.write('\n')
-        os.replace(tmp, path)
+        # Windows文件被短暂占用时有界重试，仍保留原子替换。
+        for attempt in range(8):
+            try:
+                os.replace(tmp, path)
+                break
+            except PermissionError as error:
+                if os.name != 'nt' or getattr(error,'winerror',None) not in {5,32,33} or attempt == 7:
+                    raise
+                time.sleep(0.01 * 2 ** min(attempt,3))
     finally:
         tmp.unlink(missing_ok=True)
 
@@ -131,9 +138,10 @@ def merge(old, patch):
 
 
 class AssistantService:
-    def __init__(self, workspace=PROJECT, material_roots=None, python=None):
+    def __init__(self, workspace=PROJECT, material_roots=None, python=None, runtime_context=None):
         self.root = Path(workspace).resolve()
         self.python = str(python or sys.executable)
+        self.runtime_context = runtime_context
         self.material_roots = resolve_material_roots(self.root, material_roots)
         self.jobs = self.root/'.local/assistant_jobs'
 
@@ -200,7 +208,11 @@ class AssistantService:
             if c in seen: continue
             _, files = self.resolve(c)
             form, state = read_json(files['form']), read_json(files['state'])
-            rows.append({'case_id': c, 'serial': form.get('serial'), 'amount': form.get('amount'), 'status': state.get('status')})
+            case_record=read_json(files['case'])
+            title = case_record.get('description')
+            rows.append({'case_id': c, 'title': title if isinstance(title, str) else c,
+                         'serial': form.get('serial'), 'amount': form.get('amount'), 'status': state.get('status'),
+                         **({'role':'account_inbox'} if case_record.get('material_context',{}).get('account_inbox') is True else {})})
             seen.add(c)
         return {'ok': True, 'cases': rows, 'system_write': False}
 
@@ -214,6 +226,8 @@ class AssistantService:
     def overview(self, case_id, include_parameters=False):
         from reimburse import overview
         p, paths = self.resolve(case_id)
+        from finance_execution_mode import validate_mode
+        execution_mode=validate_mode(read_json(paths['case']).get('material_context',{}).get('execution_mode'),case_id)
         if read_json(paths['case']).get('material_context', {}).get('workflow_entry'):
             from registered_inputs import load_definition
             cfg, index, auth, definition = load_definition(self, case_id)
@@ -225,14 +239,43 @@ class AssistantService:
                       'input_index':str(index), 'financial_state':'read_each_document_not_batch_root',
                       'next_action':{'tool':'parameter_cli', 'arguments':['workflow','--case-id',case_id],
                                      'reason':'本案是批次入口；按登记资料查看状态，再明确选择填单或准备待批'}}
+            result['execution_mode']=execution_mode
             if include_parameters: result['parameters'] = {k:read_json(paths[k]) for k in ['case','form']}
             return masked(result)
         r = overview(p)
+        r['execution_mode']=execution_mode
         r.update(ok=True, revision=self.revision(case_id), active_jobs=self.active_jobs(case_id), api_version=1)
         r['input_validation'] = self.input_validation(paths)
         if include_parameters: r['parameters'] = {k: read_json(paths[k]) for k in ['case', 'form']}
         if r['active_jobs']: r['next_action'] = {'tool': 'reimbursement_result', 'reason': '先查正在执行的任务，不启动第二个操作'}
-        elif r['unverified_write']: r['next_action'] = {'tool': 'reimbursement_read_system', 'mode': 'readback', 'reason': r['do_next']}
+        elif r['unverified_write']:
+            pending=r['unverified_write']
+            if pending.get('verification',{}).get('schema') == 'ustc-native-stage-v1':
+                from finance_native_stage import READ_DOMAINS
+                stage=pending['verification']['stage']
+                original_plan=read_json(Path(pending['verification']['prepare_receipt'])).get('result',{})
+                own_reader=stage=='categories'or stage in {'funding','expenses'}and bool(original_plan.get('original',{}).get('implicit_default'))
+                r['next_action'] = {'tool':'reimbursement_business','action':stage+'-prepare'if own_reader else'bill-read',
+                    **({}if own_reader else{'domain':READ_DOMAINS[stage]}),
+                    'reason':'先确认原保存脚本已结束（未知时recover原marker）；再独立HTTP回读并record_result，不重发stage'}
+            elif pending.get('verification',{}).get('schema')in {'ustc-native-student-remuneration-v1','ustc-native-workflow-v1','ustc-native-invoice-split-v1'}:
+                schema=pending['verification']['schema'];tool,action=('reimbursement_access','remuneration-recover')if schema=='ustc-native-student-remuneration-v1'else('reimbursement_submission','workflow-recover')if schema=='ustc-native-workflow-v1'else('reimbursement_correction','recover')
+                r['next_action']={'tool':tool,'action':action,'job_id':Path(pending['output_directory']).name,'reason':'只恢复原marker并取得保存后的完整独立HTTP回读；不重发原写入。建单须bind-serial，流程区分staged/saved，最终本人同意和短信由本人操作'}
+            elif pending.get('verification',{}).get('schema')=='ustc-native-invoice-amount-v1':
+                r['next_action']={'tool':'reimbursement_expense_amount','action':'recover',
+                    'job_id':Path(pending['output_directory']).name,
+                    'reason':'先读原金额初始化/保存marker并独立HTTP核逐票持久值；不重发open/save，分配分支未完成不清pending'}
+            elif pending.get('verification',{}).get('schema')=='ustc-native-http-upload-v1':
+                r['next_action']={'tool':'reimbursement_business','action':'invoice-inventory',
+                    'reason':'先按原上传job恢复未知marker；原保存结束后新发完整票池及识别明细，逐文件核filecode/来源SHA后ack-write，不重传'}
+                source=Path(pending['verification']['input']).parent
+                saved=Path(pending['verification']['save_receipt'])
+                if saved.is_file() and not (source/'recognition-continuation.json').exists():
+                    receipt=read_json(saved);body=receipt.get('result',{})
+                    if receipt.get('phase')=='script_completed' and body.get('ok')is True and body.get('phase')=='save_accepted':
+                        r['next_action']={'tool':'reimbursement_invoice','action':'upload-recognize','job_id':source.name,
+                            'reason':'原件已保存，尚无原生识别接续意图；核当前账号/tab后接续原批次识别，不上传或再次保存。之后完整独立库存回读并ack-write'}
+            else:r['next_action'] = {'tool': 'reimbursement_read_system', 'mode': 'readback', 'reason': r['do_next']}
         elif r['known_state'] == 'correction_saved_await_resubmission': r['next_action'] = {'tool': 'reimbursement_read_system', 'mode': 'status', 'reason': r['do_next']}
         elif r['known_state'] == 'submitted_to_approval': r['next_action'] = {'tool': 'reimbursement_read_system', 'mode': 'status', 'reason': '本案已进入待审批列表；先读当前状态，不重复提交。领导审批、验证码/本人后续确认和付款仍分别记录'}
         elif r['correction_in_progress']: r['next_action'] = {'tool': 'reimbursement_correction', 'action': 'check', 'reason': r['do_next']}
@@ -258,15 +301,19 @@ class AssistantService:
 
     def check(self, case_id, hashes=True):
         from operator_support import check
+        from workspace_config import material_rules_path
         p, paths = self.resolve(case_id)
-        r = check(p, hashes)
+        rules=material_rules_path(self.root if(self.root/'.local/installation.json').exists()else PROJECT)
+        r = check(p, hashes, rules_path=rules)
         r.update(revision=self.revision(case_id), input_validation=self.input_validation(paths), system_write=False)
         if not r['input_validation']['ok']: r['ok'] = False
         return masked(r)
 
-    def new_case(self, case_id, profile='student_activity'):
+    def new_case(self, case_id, profile='student_activity', title=None):
         self.case_id(case_id)
         if profile not in CASE_PROFILES: raise APIError('unsupported_profile', '未知材料profile')
+        if title is not None and (not isinstance(title, str) or not 1 <= len(title.strip()) <= 160):
+            raise APIError('case_title', '活动名称须为1至160字')
         with self.mutex(case_id):
             try: self.resolve(case_id)
             except APIError as e:
@@ -275,11 +322,17 @@ class AssistantService:
             dest = self.root/'cases'/case_id
             if not dest.resolve().is_relative_to(self.root): raise APIError('path_escape', '案件目录不能指向项目外')
             r = init_case(case_id, dest, profile)
+            if title is not None:
+                _, files = self.resolve(case_id)
+                case = read_json(files['case'])
+                case['description'] = title.strip()
+                atomic_json(files['case'], case)
+                r['title'] = title.strip()
             r['revision'] = self.revision(case_id)
             return r
 
     def update_case(self, case_id, document, changes, expected_revision):
-        allowed = {'form': {'amount', 'funding', 'expense_allocations', 'expense_categories', 'budget_allocation_mode', 'payments', 'basic', 'pre_review', 'contract', 'delivery', 'review'},
+        allowed = {'form': {'amount', 'expected_invoice_count', 'native_bill_type', 'funding', 'expense_allocations', 'expense_categories', 'budget_allocation_mode', 'payments', 'basic', 'pre_review', 'contract', 'delivery', 'review'},
                    'case': {'material_context', 'materials', 'delivery', 'description', 'decisions', 'questions'}}
         if document not in allowed or not isinstance(changes, dict) or not changes or set(changes)-allowed[document]:
             raise APIError('invalid_patch', '只更新fields文档中的业务输入；不编辑单号、票据GUID、state或说明来源')
@@ -291,10 +344,13 @@ class AssistantService:
             if document == 'form' and (paths['state'].parent/'pending_write.json').exists():
                 raise APIError('pending_write', '上次写入尚未核对，先回查再修改填报参数')
             if self.revision(case_id) != expected_revision: raise APIError('revision_conflict', '案件已被修改，重新overview后合并，不覆盖旧版本')
-            if document == 'form' and read_json(paths['form']).get('review', {}).get('workflow_started'):
+            if document == 'form' and (read_json(paths['form']).get('review', {}).get('workflow_started') or read_json(paths['state']).get('status')=='submitted_to_approval'):
                 raise APIError('workflow_started', '已有流程，普通草稿参数接口不改当前单据；材料仍可在case中登记')
             candidate = merge(read_json(paths[document]), changes)
             self.validate_patch(changes, document)
+            if document=='case' and 'execution_mode' in candidate.get('material_context',{}):
+                from finance_execution_mode import validate_mode
+                validate_mode(candidate['material_context']['execution_mode'],case_id)
             before = read_json(paths[document])
             log = paths['state'].parent/'receipts'/('input_'+uuid.uuid4().hex+'.json')
             atomic_json(log, {'changed_at_utc': stamp(), 'document': document, 'before': before, 'after': candidate, 'system_write': False})
@@ -302,6 +358,10 @@ class AssistantService:
             return {'ok': True, 'revision': self.revision(case_id), 'input_receipt': str(log), 'system_write': False, 'next': '运行check核对金额及缺件；更新输入不等于已保存系统'}
 
     def validate_patch(self, value, document):
+        if document=='form'and 'native_bill_type'in value and (not isinstance(value['native_bill_type'],str)or value['native_bill_type']not in {'1','2'}):
+            raise APIError('bill_type','原生建单类型仅支持日常1或国内差旅2；不修改已保存单据的实际类型')
+        if document=='form'and 'expected_invoice_count'in value and(type(value['expected_invoice_count'])is not int or not 0<=value['expected_invoice_count']<=1000):
+            raise APIError('invoice_count','预计申报票数须0至1000整数；后续仍逐原件和选票核对')
         if document == 'case':
             if 'materials' in value:
                 if not isinstance(value['materials'], list): raise APIError('invalid_patch', 'materials须为列表')
@@ -345,7 +405,7 @@ class AssistantService:
             if (paths['state'].parent/'pending_write.json').exists(): raise APIError('pending_write', '上次写入尚未核对，先回查再导入说明')
             if self.revision(case_id) != expected_revision: raise APIError('revision_conflict', '先重新overview再导入说明')
             form = read_json(paths['form'])
-            if form.get('review', {}).get('workflow_started') and not record_only:
+            if (form.get('review', {}).get('workflow_started') or read_json(paths['state']).get('status')=='submitted_to_approval') and not record_only:
                 raise APIError('workflow_started', '已有流程的说明只留档；不能借导入说明自动安排线上修改')
             source = paths['form'].parent/'receipts'/('explanation_'+uuid.uuid4().hex+'.txt')
             source.parent.mkdir(parents=True, exist_ok=True)
@@ -373,16 +433,25 @@ class AssistantService:
             previous = copy.deepcopy(row)
             row.update(invoice_number_candidates=list(dict.fromkeys(invoice_numbers)), visual_check='verified', visual_check_note=note, visual_checked_at_utc=stamp())
             if native_guid:
-                if len(invoice_numbers)!=1: raise APIError('binding_number', '航空原生绑定须唯一票号')
-                receipt = self.artifact(case_id, pool_job_id, pool_artifact_id)
-                data = read_json(receipt).get('result', {})
-                matches = [r for g in data.get('grids', []) if str(g.get('funcno'))=='53' for r in g.get('rows', []) if r.get('t.tk_guid')==native_guid]
-                if len(matches)!=1 or matches[0].get('t.tk_type')!='3PLANE' or matches[0].get('t.serial_no') or matches[0].get('t.tk_mod_flag')!='NORMAL':
+                if len(invoice_numbers)!=1 or not re.fullmatch(r'[0-9]{20}',invoice_numbers[0]): raise APIError('binding_number', '航空原生绑定须唯一完整20位票号')
+                receipt,wrapped,origin = self._typed_case_artifact(case_id,pool_job_id,pool_artifact_id,'invoice_verification',['full-grid'])
+                data=wrapped.get('result',{});parameters=origin.get('parameters',{})
+                grids=[g for g in data.get('grids',[]) if str(g.get('funcno'))=='53']
+                if (parameters.get('grid')!='53' or not parameters.get('expected_userid') or
+                    wrapped.get('tab_id')!=parameters.get('tab_id') or data.get('ok') is not True or
+                    data.get('projid')!='WF_YBX' or data.get('scopeComplete') is not True or
+                    data.get('identity',{}).get('userid')!=parameters['expected_userid'] or len(grids)!=1 or
+                    grids[0].get('allRecordsVisible') is not True or grids[0].get('records')!=len(grids[0].get('rows',[]))):
+                    raise APIError('native_binding','航空绑定须同案、同账号的完整53票池正式回执')
+                matches=[r for r in grids[0]['rows'] if r.get('t.tk_guid')==native_guid]
+                if len(matches)!=1 or matches[0].get('t.tk_type') not in {'3PLANE','PLANE'} or matches[0].get('t.serial_no') or matches[0].get('t.tk_mod_flag')!='NORMAL':
                     raise APIError('native_binding', '只接受完整回读中唯一、未占用、NORMAL航空票记录')
                 x = matches[0]
                 row['verified_native_binding'] = {'source_sha256': row['sha256'], 'confirmed': True, 'receipt': str(receipt), 'guid': native_guid,
                     'number': invoice_numbers[0], 'type': x['t.tk_type'], 'display': x['t.tk_display_abst'],
-                    'amount': x['t.tk_total_amt'].replace(',', ''), 'person_id': x['t.tk_buysno'], 'operator_check_note': note}
+                    'amount': x['t.tk_total_amt'].replace(',', ''), 'person_id': x['t.tk_buysno'], 'operator_check_note': note,
+                    'receipt_sha256':hashlib.sha256(receipt.read_bytes()).hexdigest(),'pool_job_id':pool_job_id,
+                    'pool_artifact_id':pool_artifact_id,'expected_userid':parameters['expected_userid']}
             atomic_json(paths['state'].parent/'receipts'/('invoice_review_'+uuid.uuid4().hex+'.json'), {'index': index, 'before': previous, 'after': row, 'system_write': False})
             atomic_json(paths['invoices'], m)
             return {'ok': True, 'revision': self.revision(case_id), 'index': index, 'system_write': False, 'note': '这是操作助手核对记录，不是税务认证'}
@@ -423,26 +492,122 @@ class AssistantService:
         p = PROJECT / (DOCS if language == 'zh' else DOCS_EN)[topic]
         return {'ok': True, 'topic': topic, 'language': language, 'path': str(p), 'text': p.read_text(encoding='utf-8'), 'system_write': False}
 
+
+    def business(self, case_id, action, tab_id, expected_userid, request_id, domain=None, source_job_id=None, print_job_id=None, reference_serial=None, staff_query=None, notes_xtype=None):
+        from finance_business_api import validate
+        parameters = {'action': action, 'tab_id': tab_id, 'expected_userid': expected_userid}
+        if domain is not None:
+            parameters['domain'] = domain
+        for key, value in [('source_job_id', source_job_id), ('print_job_id', print_job_id), ('reference_serial', reference_serial), ('staff_query',staff_query), ('notes_xtype',notes_xtype)]:
+            if value is not None:
+                parameters[key] = value
+        validate(parameters)
+        return self.enqueue(case_id, 'business', parameters, request_id, False)
+
+    def finance_feedback(self, case_id, source_job_id, serials=None, include_history=False, output_dir=None, execute=False):
+        from finance_feedback import run
+        return run(self, case_id, source_job_id, serials, include_history, output_dir, execute)
+
+    def intake_review(self, case_id, intake_job_id=None, action='inspect', records=None, expected_revision=None,
+                      confirmation_note=None, execute=False, offset=0, limit=50, material_id=None, page=1):
+        from intake_review import run
+        return run(self, case_id, intake_job_id, action, records, expected_revision, confirmation_note, execute, offset, limit, material_id, page)
+
+    def task_view(self, case_id, job_id, wait_seconds=0):
+        from task_view import run
+        return run(self, case_id, job_id, wait_seconds)
+
+    def assist(self, action='discover', group=None, operation=None, inputs=None, case_id=None,
+               intent_id=None, job_id=None, confirmation=None):
+        from agent_assist import run
+        return run(self, action, group, operation, inputs, case_id, intent_id, job_id, confirmation)
+
+    def case_details(self, case_id, action='inspect', values=None, expected_revision=None, confirmation_note=None, execute=False):
+        from case_details import run
+        return run(self,case_id,action,values,expected_revision,confirmation_note,execute)
+
+    def case_journey(self, case_id, action='inspect', index=None):
+        from case_journey import run
+        return run(self,case_id,action,index)
+
+    def finance_connection(self, action='status', expected_userid=None, tab_id=None, connection_id=None, source_job_id=None, request_id=None, execute=False):
+        from finance_connection import run
+        return run(self,action,expected_userid,tab_id,connection_id,source_job_id,request_id,execute)
+
+    def material_requirements(self,case_id,action='inspect',values=None,expected_revision=None,note=None,execute=False):
+        from material_requirements import run
+        return run(self,case_id,action,values,expected_revision,note,execute)
+
+    def intake_groups(self,case_id,intake_job_id,groups=None,expected_revision=None,execute=False):
+        from intake_groups import run
+        return run(self,case_id,intake_job_id,groups,expected_revision,execute)
+
+    def receive_materials(self,case_id,paths,request_id,grouping='unassigned',execute=False,source_sha256=None):
+        from receive_materials import run
+        return run(self,case_id,paths,request_id,grouping,execute,source_sha256)
+
+    def case_finance(self,case_id,action='inspect',connection_id=None,job_id=None,invoice_numbers=None,
+                     start=0,count=1,plan_id=None,authorization_note=None,request_id=None,execute=False):
+        from case_finance import run
+        return run(self,case_id,action,connection_id,job_id,invoice_numbers,start,count,plan_id,authorization_note,request_id,execute)
+
+    def approver_batch(self,action='list',connection_id=None,source_job_id=None,selected_ids=None,decision='agree',opinion=None,
+                       plan_id=None,authorization_note=None,request_id=None,execute=False):
+        from finance_approver_service import run
+        return run(self,action,connection_id,source_job_id,selected_ids,decision,opinion,plan_id,authorization_note,request_id,execute)
+
+    def print_batch(self, case_id, request_id, merge_pdf=None, finance_only=None,
+                    output_root=None, sequences=None, execute=False):
+        from finance_print_batch import prepare, preview
+        from print_delivery import fingerprint
+        _, _, _, spec = prepare(self, case_id, merge_pdf=merge_pdf, finance_only=finance_only,
+                                output_root=output_root, sequences=sequences)
+        params = {**spec['options'], 'output_root': spec['output_root'],
+                  'sequences': sequences, 'plan_fingerprint': fingerprint(spec)}
+        return self.enqueue(case_id, 'print_batch', params, request_id, execute)
+
+    def material_review(self, action='list', workspace=None, port=8766):
+        from material_review_service import run
+        return run(self, action, workspace, port)
+
     def capabilities(self, intent='materials'):
         from assistant_guidance import capabilities
         return capabilities(intent)
+
+    def case_materials(self, case_id, action='inspect', values=None, expected_revision=None, confirmation_note=None, execute=False, offset=0, limit=50):
+        from case_materials import run
+        return run(self, case_id, action, values, expected_revision, confirmation_note, execute, offset, limit)
+
+    def case_delivery(self,case_id,action='inspect',business_date=None,sequence=None,kind='details',include_invoice_attachments=None,plan_id=None,confirmation_note=None,execute=False):
+        from case_delivery import run
+        return run(self,case_id,action,business_date,sequence,kind,include_invoice_attachments,plan_id,confirmation_note,execute)
 
     def register_workflow(self, case_id, request, output_dir, execute=False, expected_preview_sha256=None):
         from workflow_registration import register
         return register(self, case_id, request, output_dir, execute, expected_preview_sha256)
 
+
     def workflow(self, case_id, phase='status', execute=False):
         from registered_workflow import run_registered_workflow
         return run_registered_workflow(self, case_id=case_id, phase=phase, execute=execute)
+
 
     def bridge(self, action='status', execute=False, request_id=None, expected_registration_sha256=None):
         from bridge_service import run
         return run(action=action, execute=execute, request_id=request_id,
                    expected_registration_sha256=expected_registration_sha256)
 
-    def standards_read(self, library_root, profile_id=None):
+
+    def standards_read(self, library_root=None, profile_id=None):
         from reimbursement_standards import standards_read
+        if library_root is None:
+            from workspace_config import standards_library
+            library_root=str(standards_library(self.root))
         return standards_read(self, library_root, profile_id)
+
+    def standards_import(self,bundle,execute=False,expected_snapshot=None):
+        from standards_import import run
+        return run(self,bundle,execute,expected_snapshot)
 
     def standards_init(self, library_root, profile_id, title, mode='student_activity', execute=False):
         from reimbursement_standards import standards_init
@@ -460,6 +625,19 @@ class AssistantService:
     def standards_select(self, library_root, profile_id, context, as_of):
         from reimbursement_standards import standards_select
         return standards_select(self, library_root, profile_id, context, as_of)
+
+    def applicant_batch(self, case_id, manifest, tab_id, request_id, execute=False):
+        from applicant_http_batch import run,manifest as validate_manifest
+        from registered_inputs import checked_reference
+        from finance_native_create import frozen
+        from platform_runtime import file_lock
+        if not isinstance(execute,bool)or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,95}',str(request_id))or not re.fullmatch(r'\d+',str(tab_id)):raise APIError('applicant_batch_arguments','须明确原批次、tab和稳定请求号')
+        validate_manifest(self,manifest,case_id)
+        root=self.root/'.local/applicant_batches'/manifest['sha256'];root.mkdir(parents=True,exist_ok=True)
+        c={'case_id':case_id,'manifest':manifest,'workspace':str(self.root),'material_roots':[str(x)for x in self.material_roots],'tab_id':tab_id,'execute':execute,'request_id':request_id}
+        frozen(root/(request_id+('-execute'if execute else'-preview')+'-input.json'),c)
+        with file_lock(root/'coordinator.lock'):
+            output=root/(request_id+'-result-'+str(time.time_ns())+'.json');result=run(c,output);atomic_json(output,result);return result
 
     def batch_plan(self, data, export_root=None):
         from assistant_guidance import batch_plan
@@ -494,9 +672,11 @@ class AssistantService:
         result = self.enqueue(case_id, 'material_ocr', {'action': 'resume', 'ocr_job_id': ocr_job_id}, request_id, True)
         return {**result, 'system_write': False, 'next': 'result读取原OCR续办状态；不重复提交计算或进行财务确认'}
 
-    def pdf_export(self, case_id, export_plan, export_root, tab_id, expected_userid, request_id, silent=True, execute=False):
+    def pdf_export(self, case_id, export_plan, export_root, tab_id, expected_userid, request_id, silent=True, execute=False, resume_job_id=None, source_job_id=None):
         parameters = {'export_plan':export_plan,'export_root':export_root,'tab_id':tab_id,
                       'expected_userid':expected_userid,'silent':silent}
+        if resume_job_id is not None:parameters['resume_job_id']=resume_job_id
+        if source_job_id is not None:parameters['source_job_id']=source_job_id
         return self.enqueue(case_id, 'pdf_export', parameters, request_id, execute)
 
     def pdf_export_inspect(self, case_id, job_id):
@@ -512,7 +692,7 @@ class AssistantService:
             raise APIError('job_unfinished', '原PDF任务尚在运行，继续result，不启动第二次导出')
         artifacts = status.get('artifacts', [])
         registered_intent = False
-        for name in ['intent.json','export_receipt.json','failure.json']:
+        for name in ['intent.json','export_receipt.json','rejection_receipt.json','failure.json']:
             matching = [row for row in artifacts if row.get('name') == name]
             if name == 'intent.json':
                 registered_intent = bool(matching)
@@ -526,6 +706,9 @@ class AssistantService:
                         raise APIError('path_escape', '导出回执中的PDF不属于原任务导出根')
         parameters = request['parameters']
         original = canonical_request(request['operation'], parameters, request['execute'])
+        if request.get('runtime_context'):
+            from worker_context import validate
+            original['runtime_context'] = validate(request['runtime_context'],self.root)
         if request_fingerprint(original) != request.get('fingerprint'):
             raise APIError('request_changed', '原导出请求指纹不符，保留现场，不重放')
         plan = parameters['export_plan']
@@ -667,6 +850,14 @@ class AssistantService:
         return self.enqueue(case_id, 'expense_amount', params, request_id, execute)
 
     def _expense_amount_command(self, case_id, params, folder, output, execute, request_id):
+        action=params.get('action')
+        # 新HTTP金额任务只领用同案正式artifact；旧未知任务的恢复仍保留原入口。
+        source_job=params.get('source_job_id')or params.get('job_id')
+        native_source=bool(source_job and(self.job_folder(case_id,source_job)/'native-amount-input.json').is_file())
+        if action=='inspect'and not source_job or native_source:
+            from finance_native_amount import command as native_command
+            try:return native_command(self,{'case_id':case_id,'parameters':params,'execute':execute,'request_id':request_id},folder)
+            except (ValueError,KeyError,TypeError,OSError)as error:raise APIError('expense_amount_source',str(error))from error
         from finance_expense_amount import base_request, bind_source, validate_source, open_script, return_script, same_target,prepare_reduction,save_script
         action = params.get('action')
         if action not in ['open', 'inspect', 'return', 'recover','save'] or execute and action not in ['open', 'return','save']:
@@ -767,11 +958,19 @@ class AssistantService:
             confirmed=read_json(paths['case']).get('material_context',{}).get('medical_insurance_type_confirmation',{})
             if confirmed.get('confirmed') is not True or confirmed.get('value')!='自费' or not confirmed.get('user_text') or {'invoice_code':request['invoice_code'],'invoice_number':request['invoice_number']} not in confirmed.get('invoices',[]):
                 raise APIError('invoice_medical_confirmation','本案尚无此票医保类型的明确确认；不能从现金支付自行猜填参保险种')
+        if (request['schema']==MEDICAL_SCHEMA and action in {'inspect','medical-run'}or request['schema']==SCHEMA and action in {'inspect','run'}):
+            from finance_native_invoice_edit import command as medical_command
+            return medical_command(self,case_id,request,action,execute,request_id,folder)
         extra = []
         if action == 'recover':
             prior = read_json(self.job_folder(case_id, params.get('job_id'))/'request.json')
             if prior.get('operation') != 'invoice_edit' or prior.get('case_id') != case_id or prior.get('parameters', {}).get('tab_id') != request['tab_id'] or prior.get('parameters', {}).get('invoice_number') != request['invoice_number']:
                 raise APIError('invoice_edit_source', '恢复必须引用同案同票同标签原任务')
+            original_folder=self.job_folder(case_id,params['job_id']);native_input=original_folder/('native-medical-input.json'if request['schema']==MEDICAL_SCHEMA else'native-travel-input.json')
+            if native_input.is_file():
+                status=self.result(case_id,params['job_id'])
+                if status['status']in {'queued','running'}:raise APIError('invoice_edit_running','原医疗任务尚未停止，只查原结果')
+                return [self.python,str(PROJECT/'tools/finance_native_invoice_edit.py'),'--input',str(native_input),'--output',str(output),'--recover']
             original = read_json(self.job_folder(case_id, params.get('job_id'))/'edit_request.json')
             if original.get('case_id') != case_id or original.get('tab_id') != request['tab_id'] or original.get('invoice_number') != request['invoice_number'] or original.get('expected_userid') != request['expected_userid']:
                 raise APIError('invoice_edit_source', '原始请求身份或票号不符')
@@ -828,7 +1027,7 @@ class AssistantService:
         }[action]
         if set(params) - {'action', 'tab_id'} - fields:
             raise APIError('invoice_retry_arguments', '参数与固定异常处理动作不符')
-        cmd = [self.python, str(PROJECT/'tools/finance_invoice_retry.py'), action, '--output', str(output)]
+        cmd = [self.python, str(PROJECT/'tools/finance_invoice_retry.py'), action, '--output', str(output), '--bundle', str(self.resolve(case_id)[0])]
 
         def reference(prefix, operation, actions):
             path, value, previous = self._typed_case_artifact(case_id, params.get(prefix+'job_id'),
@@ -891,7 +1090,7 @@ class AssistantService:
             request_path = folder/'retry_request.json'
             if action == 'inspect':
                 atomic_json(request_path, request)
-                return cmd + ['--request', str(request_path), '--request-id', request_id]
+                return cmd + ['--request', str(request_path), '--request-id', request_id, '--native-http']
             if 'source_job_id' in params or 'source_artifact_id' in params:
                 source, manifest, _ = reference('source_', 'invoice_sources', ['manifest', 'audit'])
                 if manifest.get('schema') == 'ustc-case-invoice-audit-v1': manifest = manifest.get('source_manifest')
@@ -918,6 +1117,10 @@ class AssistantService:
             manifest = {**manifest, 'expected_userid': who,
                         'formal_source_artifact': {**provenance, 'path': str(source),
                             'sha256': hashlib.sha256(source.read_bytes()).hexdigest()}}
+            manifest.pop('native_upload_bindings',None)
+            from finance_native_upload import acknowledged_error_bindings
+            bindings=acknowledged_error_bindings(self,case_id,who)
+            if bindings:manifest['native_upload_bindings']=bindings
             for item in manifest.get('original_files', []): self.material_path(item.get('path'))
             (pool_path, pool, _), (recognition_path, recognition, _) = captures(who)
             inspection_path, inspection, _ = reference('inspection_', 'invoice_retry', ['inspect'])
@@ -947,6 +1150,15 @@ class AssistantService:
             raise APIError('invoice_retry_plan', str(error)) from error
         plan_sha = hashlib.sha256(plan_path.read_bytes()).hexdigest()
         cmd += ['--plan', str(plan_path), '--plan-sha256', plan_sha]
+        def source_action(prior, wanted):
+            if plan.get('business_transport')=='native_http' and prior.get('parameters',{}).get('action')=='recover':
+                original=self.job_folder(case_id,prior['parameters'].get('job_id'))
+                prior=read_json(original/'request.json')
+            return (prior.get('case_id')==case_id and prior.get('operation')=='invoice_retry'
+                and prior.get('execute')is True and prior.get('parameters',{}).get('action')==wanted
+                and prior['parameters'].get('tab_id')==tab
+                and all(prior['parameters'].get(key)==params.get(key) for key in plan_fields))
+
         if action in ['refresh', 'reidentify', 'cleanup']:
             try:
                 from finance_invoice_retry import action_script
@@ -956,8 +1168,8 @@ class AssistantService:
             return cmd + ['--request-id', request_id, '--execute']
         if action == 'readback':
             receipt_action = 'confirm' if plan['action'] in ['cleanup', 'reidentify'] else plan['action']
-            receipt_path, receipt, prior = reference('receipt_', 'invoice_retry', [receipt_action])
-            if prior.get('execute') is not True or any(prior['parameters'].get(key) != params.get(key) for key in plan_fields):
+            receipt_path, receipt, prior = reference('receipt_', 'invoice_retry', [receipt_action, *(['recover'] if plan.get('business_transport')=='native_http' else [])])
+            if not source_action(prior,receipt_action):
                 raise APIError('invoice_retry_readback', '回读须引用同案同一计划已执行的正式动作回执；清理和重识别须完成confirm')
             captures_now = captures(plan['request']['expected_userid'])
             for label, (path, _, _) in zip(['pool', 'recognition'], captures_now):
@@ -975,9 +1187,9 @@ class AssistantService:
         if action == 'confirm':
             if plan['action'] not in ['cleanup', 'reidentify']:
                 raise APIError('invoice_retry_confirm', '确认只适用于同一cleanup或reidentify计划')
-            receipt_path, receipt, prior = reference('receipt_', 'invoice_retry', [plan['action']])
+            receipt_path, receipt, prior = reference('receipt_', 'invoice_retry', [plan['action'], *(['recover'] if plan.get('business_transport')=='native_http' else [])])
             inspection_path, inspection, _ = reference('inspection_', 'invoice_retry', ['inspect'])
-            if prior.get('execute') is not True or any(prior['parameters'].get(key) != params.get(key) for key in plan_fields):
+            if not source_action(prior,plan['action']):
                 raise APIError('invoice_retry_confirm', '确认须引用本案同一计划已发起的清理或重识别正式回执')
             try:
                 from finance_invoice_retry import validate_confirm_evidence
@@ -1003,6 +1215,11 @@ class AssistantService:
         original_id = prior.get('request_id')
         if not isinstance(original_id, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,79}', original_id):
             raise APIError('invoice_retry_recovery', '原正式动作缺少可核对的稳定请求号')
+        if plan.get('business_transport')=='native_http':
+            native=self.job_folder(case_id,params['job_id'])/'native.json'
+            if not native.is_file():raise APIError('invoice_retry_recovery','原运行时回执尚未落盘；保留原job，只查其状态')
+            cmd += ['--original-runtime',str(native),'--original-runtime-sha256',hashlib.sha256(native.read_bytes()).hexdigest(),
+                    '--original-action',prior['parameters']['action']]
         return cmd + ['--request-id', original_id]
 
     def invoice_selection(self, case_id, action, tab_id, request_id, execute=False,
@@ -1066,6 +1283,16 @@ class AssistantService:
         if execute != (action == 'apply'):
             raise APIError('invoice_selection_execute', '只有apply要求明确execute=true；preview/readback/recover均为false')
         if action == 'recover':
+            original=self.job_folder(case_id,params.get('job_id'));original_request=read_json(original/'request.json')
+            intent=original/'selection-intent.json'
+            if intent.is_file():
+                status=self.result(case_id,params['job_id'])
+                if (original_request.get('operation')!='invoice_selection' or original_request.get('parameters',{}).get('action')!='apply'
+                    or original_request.get('execute')is not True or original_request['parameters'].get('tab_id')!=tab or status['status']in {'queued','running'}):
+                    raise APIError('invoice_selection_recovery','只恢复原同案、同tab已停止的冻结选择任务')
+                if params.get('artifact_id')is not None:self.artifact(case_id,params['job_id'],params['artifact_id'])
+                return [self.python,str(PROJECT/'tools/finance_native_selection.py'),'--intent',str(intent),
+                    '--intent-sha256',hashlib.sha256(intent.read_bytes()).hexdigest(),'--output',str(output)]
             source, receipt, previous = self._typed_case_artifact(case_id, params.get('job_id'), params.get('artifact_id'), 'invoice_selection', ['preview', 'apply', 'readback'])
             body = receipt.get('result') if isinstance(receipt, dict) else None
             marker = body.get('result_marker') if isinstance(body, dict) else None
@@ -1073,6 +1300,7 @@ class AssistantService:
                 raise APIError('invoice_selection_recovery', '恢复引用原生子回执同标签原marker，不接受聚合结果或重发')
             return [self.python, str(PROJECT/'tools/finance_invoice_verification.py'), 'recover', '--receipt', str(source), '--output', str(output), '--tab-id', tab]
         cmd = [self.python, str(PROJECT/'tools/invoice_selection.py'), action, '--output', str(output)]
+        cmd += ['--bundle',str(self.resolve(case_id)[0]),'--native-http']
         if action == 'preview':
             source, manifest, _ = self._typed_case_artifact(case_id, params.get('source_job_id'), params.get('source_artifact_id'), 'invoice_sources', ['manifest', 'audit'])
             if manifest.get('schema') == 'ustc-case-invoice-audit-v1':
@@ -1106,6 +1334,10 @@ class AssistantService:
                 if key in params: request[key] = params[key]
             if 'expected_userid' in request and (not isinstance(request['expected_userid'], str) or not 1 <= len(request['expected_userid']) <= 128):
                 raise APIError('invoice_selection_selectors', 'expected_userid须为原生身份字符串')
+            if not params.get('snapshot_job_id'):
+                _,native_paths=self.resolve(case_id)
+                form=read_json(native_paths['form'])
+                request['expected_userid']=request.get('expected_userid')or manifest.get('expected_userid')or form.get('expected_userid')or os.environ.get('REIMBURSEMENT_EXPECTED_USERID')
             try: request = validate_request(request)
             except ValueError as error: raise APIError('invoice_selection_selectors', str(error)) from error
             if request['grid'] == '1669':
@@ -1119,14 +1351,14 @@ class AssistantService:
             if plan.get('schema') != 'ustc-invoice-selection-v1' or plan.get('case_id') != case_id or plan.get('request', {}).get('tab_id') != tab or previous['parameters'].get('tab_id') != tab:
                 raise APIError('invoice_selection_preview', '引用同案同标签正式preview的原始计划')
             if action == 'apply':
-                if plan.get('apply_ready') is not True or plan.get('selection_available') is not True or plan.get('context_available') is not True:
+                if plan.get('apply_ready') is not True or not (plan.get('business_transport')=='native_http' and plan.get('local_selection_available')is True and plan.get('local_context_unbound')is True or plan.get('selection_available')is True and plan.get('context_available')is True):
                     raise APIError('invoice_selection_not_ready', '候选预览缺真实勾选或上下文，不可apply')
                 if not re.fullmatch(r'[A-Za-z0-9_-]{1,80}', request_id):
                     raise APIError('invoice_selection_request_id', 'apply请求号须为1至80位ASCII字母数字/下划线/横线')
                 cmd += ['--execute', '--request-id', request_id]
             cmd += ['--preview', str(preview), '--preview-sha256', hashlib.sha256(preview.read_bytes()).hexdigest()]
         if 'snapshot_job_id' in params or 'snapshot_artifact_id' in params:
-            snapshot, data, previous = self._typed_case_artifact(case_id, params.get('snapshot_job_id'), params.get('snapshot_artifact_id'), 'invoice_verification', ['snapshot', 'surface', 'recover'])
+            snapshot, data, previous = self._typed_case_artifact(case_id, params.get('snapshot_job_id'), params.get('snapshot_artifact_id'), 'invoice_verification', ['snapshot', 'surface', 'recover','full-grid'])
             if data.get('tab_id') != tab or previous['parameters'].get('tab_id') != tab:
                 raise APIError('invoice_selection_snapshot', '来源snapshot须为同案同标签正式只读回执')
             cmd += ['--snapshot', str(snapshot)]
@@ -1153,7 +1385,7 @@ class AssistantService:
             who = parameters.get('expected_userid')
             if not isinstance(who, str) or not 1 <= len(who) <= 128 or who != who.strip():
                 raise APIError('invoice_verification_identity', '完整回读须明确当前expected_userid')
-            cmd += ['--grid', parameters['grid'], '--expected-userid', who]
+            cmd += ['--grid', parameters['grid'], '--expected-userid', who, '--case-id',case_id]
         if action == 'surface':
             return [self.python, str(PROJECT/'tools/finance_surface.py'), 'snapshot', '--output', str(output)]
         if action in ['surface-plan', 'read-detail']:
@@ -1232,10 +1464,18 @@ class AssistantService:
                         'sha256': hashlib.sha256(source.read_bytes()).hexdigest()}
 
     def enqueue(self, case_id, operation, parameters, request_id, execute=False):
+        from worker_context import task_context
+        with task_context(self.root,operation,self.runtime_context) as context:
+            return self._enqueue(case_id,operation,parameters,request_id,execute,context)
+
+    def _enqueue(self, case_id, operation, parameters, request_id, execute=False, runtime_context=None):
+        if (self.root/'.local/maintenance-active.json').exists():raise APIError('maintenance_active','程序正在升级或回退；原资料和任务保留，完成维护后再办理')
         self.resolve(case_id)
         if not isinstance(request_id, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,95}', request_id):
             raise APIError('request_id_required', 'request_id使用1至96位字母数字/点/下划线/短横线；同一意图重连重试保持相同编号')
         request = canonical_request(operation, parameters, execute)
+        if runtime_context:
+            request['runtime_context'] = runtime_context
         fingerprint = request_fingerprint(request)
         job_id = 'j_'+hashlib.sha256((case_id+'\0'+request_id).encode()).hexdigest()[:24]
         folder = self.jobs/case_id/job_id
@@ -1244,6 +1484,8 @@ class AssistantService:
                 old = read_json(folder/'request.json')
                 # 旧任务保留原字节与指纹，只按同一默认值规则比较，不重建或重跑。
                 previous = canonical_request(old['operation'], old['parameters'], old['execute'])
+                if old.get('runtime_context'):
+                    previous['runtime_context'] = old['runtime_context']
                 if request_fingerprint(previous) != fingerprint: raise APIError('request_id_conflict', '相同request_id不能更改动作或参数；新意图使用新编号')
                 return {'ok': True, 'job_id': job_id, 'reused_existing_job': True, 'status': read_json(folder/'status.json')['status'], 'next': 'reimbursement_result读取原任务，不再次执行'}
             if self.active_jobs(case_id): raise APIError('case_busy', '本案有未结束任务，先result核对')
@@ -1349,26 +1591,31 @@ class AssistantService:
             if output:
                 envelope = read_json(output['path'])
                 action_result = envelope.get('result', {})
-                if envelope.get('phase') == 'script_completed' and action_result.get('ok') is True and action_result.get('case_id') == case_id and action_result.get('action') == request['parameters']['action'] and action_result.get('marker', {}).get('phase') == 'button_returned':
+                if envelope.get('phase') == 'script_completed' and action_result.get('ok') is True and action_result.get('case_id') == case_id and action_result.get('action') == request['parameters']['action'] and action_result.get('marker', {}).get('phase') in ['button_returned','awaiting_http_confirmation']:
                     r.update(needs_confirmation=True, requires_independent_readback=True,
-                             next='原生按钮已返回，仍须独立inspect核对确认弹窗后confirm，再回读；尚未证明重识别或清理完成')
+                             next='动作仍待确认；HTTP清理须新发完整inspect后confirm，再独立双库存回读及ack-write；旧界面回执须核确认弹窗，不混用来源')
         r.update(job_id=job_id, case_id=case_id, ok=r['status']=='completed', system_result_verified=False)
         return masked(r, _registered_paths=registered_paths)
 
     def command(self, request, folder):
         """唯一命令目录。参数不是shell文本，路径由本案和回执标识解析。"""
-        p, _ = self.resolve(request['case_id'])
+        p, claim_paths = self.resolve(request['case_id'])
         op, a, execute = request['operation'], request['parameters'], request['execute']
         if not isinstance(a, dict) or not isinstance(execute, bool): raise APIError('invalid_arguments', '参数须为对象，execute须为布尔值')
-        allowed = {'material_intake': {'request'}, 'material_ocr': {'action', 'request', 'ocr_job_id'},
-                   'pdf_export': {'export_plan','export_root','tab_id','expected_userid','silent'},
-                   'check': {'hashes'}, 'tabs': set(), 'scan': {'paths', 'invoices'}, 'stage': {'stage', 'tab_id'},
-                   'invoice': {'action', 'start', 'count', 'tab_id'}, 'read_system': {'mode', 'tab_id', 'job_id', 'artifact_id', 'serial', 'expected_userid'},
+        from finance_approver_service import assert_can_dispatch
+        assert_can_dispatch(self,request)
+        from operator_support import claim_hold_blocks
+        if execute and claim_hold_blocks(request,read_json(claim_paths['case'])):
+            raise APIError('claim_on_hold','本案由用户明确整单暂缓；仅允许材料核对、原结果恢复及明确撤销未提交草稿，不能剔除问题费用后继续做单')
+        allowed = {'approver_batch':{'action','plan_id','connection_id'},'business': {'action', 'domain', 'tab_id', 'expected_userid', 'source_job_id', 'print_job_id', 'reference_serial', 'staff_query', 'notes_xtype'}, 'print_batch': {'merge_pdf','finance_only','output_root','sequences','plan_fingerprint'}, 'material_intake': {'request'}, 'material_ocr': {'action', 'request', 'ocr_job_id'},
+                   'pdf_export': {'export_plan','export_root','tab_id','expected_userid','silent','resume_job_id','source_job_id'},
+                   'check': {'hashes'}, 'tabs': set(), 'scan': {'paths', 'invoices'}, 'stage': {'stage', 'tab_id','noop_only'},
+                   'invoice': {'action', 'start', 'count', 'tab_id', 'job_id'}, 'read_system': {'mode', 'tab_id', 'job_id', 'artifact_id', 'serial', 'expected_userid'},
                    'record_result': {'kind', 'job_id', 'artifact_id', 'serial', 'outcome', 'note'}, 'activity': {'values', 'check_only', 'allow_incomplete'},
                    'render': {'job_id', 'artifact_id'},
                    'correction': {'action', 'plan', 'group', 'key', 'kind', 'tab_id', 'job_id', 'artifact_id'},
-                   'submission': {'action', 'plan', 'tab_id'},
-                   'access': {'action', 'tab_id', 'job_id', 'artifact_id', 'expected_userid', 'silent'},
+                   'submission': {'action', 'plan', 'tab_id','job_id','artifact_id'},
+                   'access': {'action', 'tab_id', 'job_id', 'artifact_id', 'expected_userid', 'silent', 'separate_window','student_id','query','plan','authority'},
                    'invoice_verification': {'action', 'tab_id', 'invoice_numbers', 'view', 'job_id', 'artifact_id', 'operation_key', 'grid', 'expected_userid'},
                    'invoice_edit': {'action', 'tab_id', 'invoice_number', 'expected_userid', 'job_id', 'artifact_id', 'inspection_job_id', 'inspection_artifact_id'},
                    'expense_amount': {'action', 'group', 'subject', 'expected_userid', 'tab_id', 'source_job_id', 'source_artifact_id', 'job_id', 'artifact_id','claims_path'},
@@ -1381,7 +1628,7 @@ class AssistantService:
                        'selectors', 'mode', 'grid', 'serial', 'expected_userid', 'expected_before_guids',
                        'snapshot_job_id', 'snapshot_artifact_id', 'preview_job_id', 'preview_artifact_id', 'job_id', 'artifact_id'}}
         if op not in allowed or set(a)-allowed[op]: raise APIError('unknown_operation', '动作或参数不在固定接口目录')
-        if execute and op not in ['stage', 'invoice', 'correction', 'submission', 'access', 'invoice_selection', 'invoice_retry', 'invoice_edit', 'expense_amount', 'pdf_export', 'material_intake', 'material_ocr']: raise APIError('invalid_execute', '只有已支持执行目录允许execute，选票仅apply')
+        if execute and op not in ['approver_batch','stage', 'invoice', 'correction', 'submission', 'access', 'invoice_selection', 'invoice_retry', 'invoice_edit', 'expense_amount', 'pdf_export', 'material_intake', 'material_ocr', 'print_batch']: raise APIError('invalid_execute', '只有已支持执行目录允许execute，选票仅apply')
         cmd = [self.python, str(PROJECT/'reimburse.py'), '--bundle', str(p)]
         output = folder/'output.json'
         tab = a.get('tab_id')
@@ -1390,6 +1637,15 @@ class AssistantService:
             return command(self, request, folder)
         if op == 'read_system' and {'serial', 'expected_userid'} & set(a):
             raise APIError('open_draft_parameters', 'serial/expected_userid仅供固定open-draft入口')
+        if op == 'approver_batch':
+            from finance_approver_service import command
+            return command(self,request,folder)
+        if op == 'business':
+            from finance_business_api import command
+            return command(self, request, folder)
+        if op == 'print_batch':
+            from finance_print_batch import command
+            return command(self, request, folder)
         if op == 'material_intake':
             from material_intake_service import command
             return command(self, request, folder)
@@ -1401,15 +1657,34 @@ class AssistantService:
             _, paths = self.resolve(request['case_id'])
             form = read_json(paths['form'])
             case = {'case_id':request['case_id'],'serial':form.get('serial')}
+            if form.get('expected_userid'):case['expected_userid']=form['expected_userid']
+            if a.get('source_job_id') is not None:
+                from finance_reference_export import reference_export_case
+                case = reference_export_case(self, request)
+            elif a.get('export_plan',{}).get('view_kind')in {'formal_print_api','details'}:
+                case.update(amount=form['amount'],basic={'fields':{'t-abst':form['basic']['fields']['t-abst']}})
             root = a.get('export_root')
             if not isinstance(root, str) or not Path(root).is_absolute() or not any(Path(root).resolve().is_relative_to(x) for x in self.material_roots):
                 raise APIError('material_root', 'PDF导出根须是material-root内的明确绝对路径')
-            preview_pdf_export(case, a.get('export_plan'), root, folder/'pdf_export', tab, a.get('expected_userid'), a.get('silent',True), False)
+            pdf_preview=preview_pdf_export(case, a.get('export_plan'), root, folder/'pdf_export', tab, a.get('expected_userid'), a.get('silent',True), False)
             atomic_json(folder/'pdf_case.json', case)
             atomic_json(folder/'pdf_plan.json', a['export_plan'])
             command = [self.python,str(PROJECT/'tools/finance_pdf_export.py'),'--case',str(folder/'pdf_case.json'),
                        '--plan',str(folder/'pdf_plan.json'),'--export-root',root,'--output-directory',str(folder/'pdf_export'),
                        '--tab-id',tab,'--expected-userid',a['expected_userid']]
+            if a.get('resume_job_id'):
+                from finance_pdf_export import print_recovery, digest, encoded
+                old=self.job_folder(request['case_id'],a['resume_job_id'])
+                prior=read_json(old/'request.json');status=self.result(request['case_id'],a['resume_job_id'])
+                if prior.get('operation')!='pdf_export' or status.get('status') not in ('failed','unknown') or any(prior['parameters'].get(k)!=a.get(k) for k in ['export_plan','export_root','tab_id','expected_userid','silent','source_job_id']):
+                    raise APIError('print_recovery_binding','只能恢复同案、原计划及原工作页的失败导出')
+                self.pdf_export_inspect(request['case_id'],a['resume_job_id'])
+                binding={'case_id':request['case_id'],'serial':case['serial'],'tab_id':tab,
+                    'expected_userid':a['expected_userid'],'plan_sha256':digest(encoded(a['export_plan'])),'destination':pdf_preview['destination']}
+                recovery=print_recovery(old/'pdf_export',binding)
+                if recovery.get('kind')=='not_dispatched':raise APIError('print_not_dispatched','原动作已确定未派发，不属于下载恢复；先结束原阻挡任务，再用新打印意图')
+                atomic_json(folder/'pdf_recovery.json',recovery)
+                command+=['--recovery',str(folder/'pdf_recovery.json')]
             return command+(['--no-silent'] if a.get('silent',True) is False else [])+(['--execute'] if execute else [])
         if op in ['stage', 'invoice', 'correction', 'read_system'] and (execute or op == 'read_system'):
             if not isinstance(tab, str) or not re.fullmatch(r'\d+', tab): raise APIError('tab_id_required', '现场操作必须传tabs查到的当前财务tab_id')
@@ -1417,22 +1692,72 @@ class AssistantService:
             if tab is not None and (not isinstance(tab, str) or not re.fullmatch(r'\d+', tab)):
                 raise APIError('invalid_tab_id', 'tab_id须为当前数字ID')
             action = a.get('action') or ('ensure' if execute else 'check')
+            if action in {'remuneration-inspect','remuneration-lookup-person','remuneration-add-person','remuneration-create-claim','remuneration-save','remuneration-readback','remuneration-recover'}:
+                from finance_native_remuneration import command as remuneration_command
+                return remuneration_command(self,request,folder)
+            if action in {'remuneration-funding-other-open','remuneration-funding-other-select','remuneration-funding-other-add'}:
+                if not execute or set(a)!={'action','tab_id','expected_userid'}:raise APIError('funding_query_scope','须明确本案、账号及标签')
+                form=self.resolve(request['case_id'])[1]['form']
+                if read_json(form).get('system_mode')!='remuneration':raise APIError('funding_query_scope','须已绑定薪酬单')
+                return [self.python,str(PROJECT/'tools/finance_cli.py'),{'remuneration-funding-other-open':'funding-other-open','remuneration-funding-other-select':'funding-other-select','remuneration-funding-other-add':'funding-other-add'}[action],'--case',str(form),'--output',str(output),'--tab-id',tab]
+            if action=='remuneration-payment-close':
+                if not execute or set(a)!={'action','tab_id','expected_userid'}:raise APIError('remuneration_scope','返回须本案账号及标签')
+                return [self.python,str(PROJECT/'tools/finance_cli.py'),'close-payments','--case',str(self.resolve(request['case_id'])[1]['form']),'--output',str(output),'--tab-id',tab,'--expected-userid',a['expected_userid']]
+            if action=='remuneration-payment-inspect':
+                if execute or set(a)!={'action','tab_id','expected_userid'}:raise APIError('remuneration_scope','薪酬结算检查只读，须本案账号及标签')
+                return [self.python,str(PROJECT/'tools/finance_cli.py'),'remuneration-payment-inspect','--case',str(self.resolve(request['case_id'])[1]['form']),'--output',str(output),'--tab-id',tab]
+            if action=='remuneration-funding-search':
+                if not execute or set(a)!={'action','tab_id','expected_userid','query'}or not isinstance(a['query'],str)or not 1<=len(a['query'])<=40:raise APIError('funding_query_scope','须明确查询词、账号及标签')
+                form=self.resolve(request['case_id'])[1]['form']
+                if read_json(form).get('system_mode')!='remuneration':raise APIError('funding_query_scope','须已绑定薪酬单')
+                return [self.python,str(PROJECT/'tools/finance_cli.py'),'funding-query','--case',str(form),'--output',str(output),'--tab-id',tab,'--group',a['query']]
+            if action in {'remuneration-basic-open','remuneration-teacher-lookup','remuneration-funding-open','remuneration-payments-open','remuneration-expenses-open'}:
+                if not execute or set(a)!={'action','tab_id','expected_userid'}:raise APIError('remuneration_section_scope','薪酬栏目须本案、账号及标签')
+                form=self.resolve(request['case_id'])[1]['form']
+                if read_json(form).get('system_mode')!='remuneration':raise APIError('remuneration_section_scope','须已绑定薪酬单')
+                return [self.python,str(PROJECT/'tools/finance_cli.py'),'teacher-lookup'if action=='remuneration-teacher-lookup'else'navigate','--case',str(form),'--output',str(output),'--tab-id',tab]+([]if action=='remuneration-teacher-lookup'else['--section',{'remuneration-basic-open':'basic','remuneration-funding-open':'funding','remuneration-payments-open':'payments','remuneration-expenses-open':'expenses'}[action]])
+            if action=='remuneration-create-claim':
+                if not execute or set(a)!={'action','tab_id','expected_userid','job_id','artifact_id'}:raise APIError('remuneration_create_scope','薪酬建单须冻结本项完整人员清单')
+                source=self.artifact(request['case_id'],a['job_id'],a['artifact_id'])
+                return [self.python,str(PROJECT/'tools/finance_remuneration_entry.py'),'--case',str(self.resolve(request['case_id'])[1]['case']),'--tab-id',tab,'--expected-userid',a['expected_userid'],'--output',str(output),'--action','create-claim','--source',str(source)]
+            if action=='remuneration-add-person':
+                if not execute or set(a)!={'action','tab_id','expected_userid','student_id','job_id','artifact_id'}:raise APIError('remuneration_add_scope','薪酬添加须冻结人员查询来源')
+                source=self.artifact(request['case_id'],a['job_id'],a['artifact_id'])
+                return [self.python,str(PROJECT/'tools/finance_remuneration_entry.py'),'--case',str(self.resolve(request['case_id'])[1]['case']),'--tab-id',tab,'--expected-userid',a['expected_userid'],'--output',str(output),'--action','add-person','--student-id',a['student_id'],'--source',str(source)]
+            if action in {'remuneration-entry','remuneration-student-category','remuneration-inspect','remuneration-activity-setup','remuneration-open-person','remuneration-lookup-person','remuneration-clear-length-rejection','remuneration-confirm-added','remuneration-close-person','remuneration-confirm-create'}:
+                if execute!=(action!='remuneration-inspect') or set(a)-({'action','tab_id','expected_userid','student_id'} if action in {'remuneration-lookup-person','remuneration-clear-length-rejection','remuneration-confirm-added'} else {'action','tab_id','expected_userid'}) or not tab or not re.fullmatch(r'[A-Za-z0-9]{2,40}',a.get('expected_userid')or''):
+                    raise APIError('remuneration_entry_scope','打开薪酬入口须本案、账号、原生标签及execute=true')
+                return [self.python,str(PROJECT/'tools/finance_remuneration_entry.py'),'--case',str(self.resolve(request['case_id'])[1]['case']),'--tab-id',tab,'--expected-userid',a['expected_userid'],'--output',str(output),'--action',{'remuneration-entry':'open','remuneration-student-category':'student-category','remuneration-inspect':'inspect','remuneration-activity-setup':'activity-setup','remuneration-open-person':'open-person','remuneration-lookup-person':'lookup-person','remuneration-clear-length-rejection':'clear-length-rejection','remuneration-confirm-added':'confirm-added','remuneration-close-person':'close-person','remuneration-confirm-create':'confirm-create'}[action]]+(['--student-id',str(a['student_id'])]if 'student_id'in a else[])
+            if action=='applicant-verification-open':
+                from finance_applicant_verification import command as verification_command
+                return verification_command(self,request,folder)
+            if action=='restore-context':
+                if not execute or set(a)-{'action'}:
+                    raise APIError('execution_mode_restore','恢复本案上下文须execute=true，不接受其他目标')
+                return [self.python,str(PROJECT/'tools/finance_execution_mode.py'),'--case',str(self.resolve(request['case_id'])[1]['case']),'--root',str(self.root),'--output',str(output)]
             if action=='diagnose':
                 if execute or not isinstance(tab,str) or set(a)-{'action','tab_id'}:
                     raise APIError('finance_session_arguments','diagnose仅对明确tab_id只读诊断，不登录或导航')
                 return [self.python,str(PROJECT/'tools/finance_access.py'),'diagnose','--tab-id',tab,'--request-id',request['request_id'],'--output',str(output)]
-            if action == 'check-page':
+            if action in {'check-page','check-backend'}:
                 if execute or not isinstance(tab, str) or not re.fullmatch(r'[0-9]+', tab) or set(a)-{'action','tab_id','expected_userid'} or not isinstance(a.get('expected_userid'), str) or not re.fullmatch(r'[A-Za-z0-9]{2,40}', a['expected_userid']):
-                    raise APIError('finance_session_arguments', 'check-page仅静默只读，须明确tab_id和expected_userid，不接URL或脚本')
+                    raise APIError('finance_session_arguments', action+'仅静默只读，须明确tab_id和expected_userid，不接URL或脚本')
+                if action == 'check-backend':
+                    return [self.python,str(PROJECT/'tools/finance_backend_health.py'),'--case-id',request['case_id'],
+                            '--tab-id',tab,'--expected-userid',a['expected_userid'],'--output',str(output)]
                 return [self.python, str(PROJECT/'tools/finance_session.py'), 'check-page', '--case-id', request['case_id'], '--tab-id', tab, '--expected-userid', a['expected_userid'], '--output', str(output)]
             if action in ['new-interface', 'recover-interface','wake-interface']:
                 cmd = [self.python, str(PROJECT/'tools/finance_session.py'), action,
                        '--case-id', request['case_id'], '--output', str(output)]
                 if action in ['new-interface','wake-interface']:
-                    if not execute or (action=='wake-interface' and tab is None) or set(a)-({'action','tab_id','silent'} if action=='new-interface' else {'action','tab_id'}):
+                    if not execute or (action=='wake-interface' and tab is None) or set(a)-({'action','tab_id','silent','separate_window'} if action=='new-interface' else {'action','tab_id'}):
                         raise APIError('finance_session_arguments', '开页须execute=true；唤醒须旧tab_id；不接URL/脚本/其他路径')
                     if 'silent' in a and type(a['silent']) is not bool: raise APIError('finance_session_arguments','silent须为布尔开关')
-                    return cmd+['--request-id', request['request_id']]+(['--tab-id', tab] if tab is not None else [])+(['--allow-foreground-open'] if a.get('silent',True) is False else [])
+                    if 'separate_window' in a and type(a['separate_window']) is not bool:raise APIError('finance_session_arguments','separate_window须为布尔开关')
+                    from finance_execution_mode import validate_mode
+                    mode=validate_mode(read_json(self.resolve(request['case_id'])[1]['case']).get('material_context',{}).get('execution_mode'),request['case_id'])
+                    silent=a.get('silent',mode['mode']!='full_control')
+                    return cmd+['--request-id', request['request_id']]+(['--tab-id', tab] if tab is not None else [])+(['--allow-foreground-open'] if action=='new-interface' and silent is False else [])+(['--separate-window']if a.get('separate_window')else[])
                 if execute or set(a)-{'action', 'job_id', 'artifact_id'}:
                     raise APIError('finance_session_arguments', '恢复只引用同案job/artifact，execute=false，不新开界面')
                 source = self.artifact(request['case_id'], a.get('job_id'), a.get('artifact_id'))
@@ -1440,7 +1765,7 @@ class AssistantService:
                 native = read_json(source)
                 if previous.get('operation') != 'access' or previous.get('parameters', {}).get('action') != 'new-interface' or native.get('schema') not in ['ustc-finance-session-v1','ustc-finance-background-plan-v1','ustc-finance-page-open-v2'] or native.get('case_id') != request['case_id'] or native.get('request_id') != previous.get('request_id') or native.get('old_tab_id') != previous.get('parameters', {}).get('tab_id'):
                     raise APIError('finance_session_source', '只能盘点同案正式新界面原意图/SHA回执，不重发启动')
-                return cmd+['--request-id', previous['request_id'], '--receipt', str(source)]+(['--tab-id', native['old_tab_id']] if native['old_tab_id'] is not None else [])+(['--allow-foreground-open'] if native.get('silent',True) is False else [])
+                return cmd+['--request-id', previous['request_id'], '--receipt', str(source)]+(['--tab-id', native['old_tab_id']] if native['old_tab_id'] is not None else [])+(['--allow-foreground-open'] if native.get('silent',True) is False else [])+(['--separate-window']if native.get('separate_window')else[])
             if action not in ['check', 'ensure'] or (action == 'ensure') != execute or set(a)-{'action', 'tab_id', 'session_only'}:
                 raise APIError('finance_session_arguments', 'access仅check/ensure/new-interface/recover-interface；动作与execute须一致')
             if 'session_only' in a and (action != 'ensure' or type(a['session_only']) is not bool):
@@ -1472,26 +1797,63 @@ class AssistantService:
             cmd += ['scan', *map(str, [self.material_path(x) for x in a['paths']]), '--output', str(output)]+(['--invoices'] if a.get('invoices', True) else [])
         elif op == 'stage':
             if a.get('stage') not in STAGES: raise APIError('unsupported_stage', 'stage须为已支持阶段')
+            from finance_native_stage import STAGES as HTTP_STAGES, command as http_stage_command
+            if a['stage'] in HTTP_STAGES:
+                return http_stage_command(self, request, folder)
             from reimburse import guard_step
             _, paths = self.resolve(request['case_id'])
             guard_step(read_json(paths['form']), a['stage'])
             cmd += ['step', a['stage']]+(['--execute'] if execute else [])
         elif op == 'invoice':
             action = a.get('action')
-            if action == 'upload':
-                start, count = a.get('start', 0), a.get('count', 10)
-                if type(start) is not int or type(count) is not int or start<0 or not 1<=count<=10: raise APIError('batch_size', 'start为非负整数，count为1至10')
-                _, paths = self.resolve(request['case_id'])
-                rows = read_json(paths['invoices']).get('original_files', [])[start:start+count]
-                if any(row.get('ocr_issues') and row.get('visual_check')!='verified' for row in rows):
-                    raise APIError('invoice_needs_review', '本批原件有OCR异常；先查看原件并verify_invoice登记核对')
-                cmd += ['upload', '--start', str(start), '--count', str(count)]
-            elif action in ['open-pool', 'open-upload', 'read', 'save-upload', 'create-draft','resume-draft']: cmd += ['invoice', action]
+            if action in {'domestic-allowance-inspect','domestic-allowance-finalize','domestic-travel-add-prepare','domestic-travel-add-save','domestic-travel-add-recover','domestic-allowance-edit-prepare','domestic-allowance-edit-save','domestic-allowance-edit-recover'}:
+                from finance_domestic_allowance import command as domestic_allowance_command
+                return domestic_allowance_command(self,request,folder)
+            if action in {'draft-cancel-prepare','draft-cancel','draft-cancel-recover'}:
+                from finance_claim_cancel import command as cancel_command
+                return cancel_command(self,request,folder)
+            if action=='upload-release':
+                from finance_upload_release import command as release_command
+                return release_command(self,request,folder)
+            if action in {'allowance-create','allowance-readback','allowance-recover'}:
+                from finance_allowance import command
+                return command(self,request,folder)
+            if action in {'nonvat-inspect','allowance-inspect','allowance-prepare','nonvat-save','nonvat-readback','nonvat-recover','nonvat-select'}:
+                from finance_supplement import command as supplement_command
+                return supplement_command(self,request,folder)
+            if action in {'upload-recognize','upload-recognize-resume','upload-recover-recognition'}:
+                from finance_upload_recognition import command as recognition_command
+                return recognition_command(self, request, folder)
+            if action in {'create-draft','resume-draft'}:
+                from finance_native_create import command as create_command
+                return create_command(self,request,folder)
+            if action in {'upload','upload-resume'}:
+                if action=='upload':
+                    start,count=a.get('start',0),a.get('count',10)
+                    if type(start)is not int or type(count)is not int or start<0 or not 1<=count<=10:raise APIError('batch_size','start为非负整数，count为1至10')
+                    _,paths=self.resolve(request['case_id'])
+                    for row in read_json(paths['invoices']).get('original_files',[])[start:start+count]:
+                        visual=row.get('visual_check');verified=visual in ['verified','user_confirmed']if isinstance(visual,str)else isinstance(visual,dict)and visual.get('status')=='verified'
+                        if row.get('ocr_issues') and not verified:raise APIError('invoice_needs_review','本批原件有OCR异常；先查看原件并verify_invoice登记核对')
+                from finance_native_upload import command as upload_command
+                return upload_command(self,request,folder)
+            if a.get('job_id')is not None:raise APIError('invoice_job_reference','job_id只用于原HTTP上传恢复')
+            if action in ['open-pool', 'open-upload', 'read', 'save-upload', 'create-draft','resume-draft']: cmd += ['invoice', action]
             else: raise APIError('unsupported_invoice_action', '未知发票动作；无删除接口')
             if execute: cmd += ['--execute']
         elif op == 'correction':
+            from finance_returned import ACTIONS as RETURNED_ACTIONS
+            if a.get('action') in RETURNED_ACTIONS:
+                from finance_returned import command as returned_command
+                return returned_command(self,request,folder)
             from correction import validate_plan
             action = a.get('action')
+            if isinstance(a.get('plan'),dict)and a['plan'].get('native_keys')and action in {'inspect','apply','verify','recover'}:
+                for row in a['plan'].get('people',[]):
+                    source=self.material_path(row['source_file'])
+                    if source.suffix.lower()not in ['.pdf','.ofd','.png','.jpg','.jpeg']:raise APIError('correction_source','逐票方案只接受原始票据文件')
+                from finance_native_split import command as split_command
+                return split_command(self,request,folder)
             if action not in ['check', 'verify', 'apply', 'begin', 'open', 'select', 'update', 'save', 'return', 'remark', 'basic', 'basic-read', 'basic-close', 'drafts', 'resume']:
                 raise APIError('unsupported_correction', '只提供逐票拆分动作，不提供审批同意或重建')
             if not isinstance(a.get('plan'), dict): raise APIError('correction_plan', 'plan须含票据、人员、往返用途及经费上限')
@@ -1511,6 +1873,15 @@ class AssistantService:
             if action == 'verify': cmd += ['--readback', str(self.artifact(request['case_id'], a.get('job_id'), a.get('artifact_id')))]
             if execute: cmd += ['--execute']
         elif op == 'submission':
+            if a.get('action')in {'applicant-inspect','applicant-agree','applicant-readback','applicant-recover','applicant-refresh','applicant-documents'}:
+                from finance_native_applicant import command as applicant_command
+                return applicant_command(self,request,folder)
+            if a.get('action')in {'workflow-inspect','next','promise','department','applicant-prepare','workflow-readback','workflow-recover'}:
+                from finance_native_workflow import command as workflow_command
+                return workflow_command(self,request,folder)
+            if a.get('action')in {'options','inspect','options-recover'}:
+                from finance_native_submission import command as submission_command
+                return submission_command(self,request,folder)
             from submission import ACTIONS, validate_plan
             action = a.get('action')
             if action not in ACTIONS: raise APIError('unsupported_submission', '提交动作须为inspect/delivery-open/options/next/promise/department/applicant-agree')
@@ -1529,11 +1900,31 @@ class AssistantService:
                 _, paths = self.resolve(request['case_id'])
                 if read_json(paths['form']).get('serial'): cmd += [mode, '--output', str(output)]
                 else: cmd += ['invoice', 'read', '--execute']  # 建单前也能独立读上传追踪和原生票据池。
-            elif mode == 'recover': cmd += ['recover', '--receipt', str(self.artifact(request['case_id'], a.get('job_id'), a.get('artifact_id')))]
+            elif mode == 'recover':
+                source=self.artifact(request['case_id'],a.get('job_id'),a.get('artifact_id'));original_folder=self.job_folder(request['case_id'],a.get('job_id'));native_input=original_folder/'native-stage-input.json'
+                if native_input.is_file():
+                    original=read_json(original_folder/'request.json')
+                    if original.get('operation')!='stage'or original.get('execute')is not True or source!=original_folder/'output.json':raise APIError('native_stage_recover','只恢复同案原HTTP阶段output marker')
+                    return[self.python,str(PROJECT/'tools/finance_native_stage.py'),'--input',str(native_input),'--output',str(output),'--recover']
+                cmd += ['recover','--receipt',str(source)]
             else: raise APIError('unsupported_read', 'mode为status/readback/recover/open-draft')
         elif op == 'record_result':
             source = self.artifact(request['case_id'], a.get('job_id'), a.get('artifact_id'))
             kind = a.get('kind')
+            if kind == 'register-originals':
+                original_request = read_json(self.job_folder(request['case_id'], a['job_id'])/'request.json')
+                if original_request.get('operation') == 'invoice_sources':
+                    path, manifest, original_request = self._typed_case_artifact(request['case_id'],a['job_id'],a['artifact_id'],'invoice_sources',['manifest'])
+                    if self.result(request['case_id'],a['job_id']).get('status') != 'completed':
+                        raise APIError('invoice_registration_source','原票源任务尚未完成')
+                    from case_invoice_sources import registration_input
+                    converted = registration_input(manifest,read_json(claim_paths['case']),self.material_roots)
+                    converted['source_reference'] = {'job_id':a['job_id'],'artifact_id':a['artifact_id'],
+                        'sha256':hashlib.sha256(path.read_bytes()).hexdigest()}
+                    source = folder/'verified_source_registration.json'
+                    if source.exists() and read_json(source) != converted:
+                        raise APIError('invoice_registration_changed','原登记输入已变，只核对原任务，不覆盖')
+                    if not source.exists():atomic_json(source,converted)
             flags = {'register-originals': '--scan-result', 'select-invoices': '--pool-receipt', 'bind-serial': '--receipt', 'ack-write': '--readback'}
             if kind not in flags: raise APIError('unsupported_record', '未知回执登记动作')
             cmd += [kind, flags[kind], str(source)]

@@ -14,9 +14,11 @@ from reimbursement_standards import (
 
 
 def capabilities(intent='materials'):
+    from finance_business_api import ACTIONS as BUSINESS_ACTIONS, READ_DOMAINS
+    from finance_transport_policy import describe
     if intent not in CAPABILITY_INTENTS:
-        raise GuidanceError('unknown_intent', 'intent须为materials、rules、ocr、finance或export')
-    if intent in {'materials', 'rules', 'ocr'}:
+        raise GuidanceError('unknown_intent', 'intent须为materials、review、rules、ocr、finance或export')
+    if intent in {'materials', 'review', 'rules', 'ocr'}:
         # 离线工作不需要用户浏览器注册、主目录资料或运行中的财务请求。
         platform = {'os': sys.platform, 'backend': 'not_probed', 'bridge_connected': None,
                     'registration_checked': False, 'bridge_status_checked': False,
@@ -27,6 +29,7 @@ def capabilities(intent='materials'):
         platform = platform_capabilities()
     blocked = platform['backend'] == 'unsupported' or (platform['os'] == 'win32' and not platform['bridge_connected'])
     next_steps = {
+        'review': {'tool': 'reimbursement_material_review', 'arguments': {'action':'list'}, 'reason':'查找本机已登记反馈台，选定workspace后open；未登记的已有工作台先register'},
         'ocr': {'tool': 'reimbursement_ocr_status', 'arguments': {}, 'reason': '先确认OCR提供方，再从本案收件job选择缺文字页；不重复识别已有原生文字'},
         'materials': {'tool': 'reimbursement_guide', 'arguments': {'topic': 'intake'},
                       'reason': '先归档本批原件和来源，再选择专项，用prepare_batch_file检查分单及未决字段'},
@@ -45,6 +48,10 @@ def capabilities(intent='materials'):
         next_steps[intent] = {'tool': 'reimbursement_overview', 'arguments': {}, 'needed_inputs': ['case_id'],
                               'reason': '桥中仍有原请求，先查本案任务和result/read_system；不新增tabs或重发业务'}
     return {'ok': True, 'schema': 'ustc-reimbursement-entry-v1', 'intent': intent, 'platform': platform,
+            'business_transport_policy': {'new_or_changed_business':'verified_native_http', 'ui_fallback':False,
+                'formal_print':'native_http', 'legacy_adapters':'not_automatically_migrated', 'legacy_dispatch':'blocked_pending_native_adapter', 'timing':'end_to_end_real_job',
+                'read_entry':'reimbursement_business', 'read_actions':list(BUSINESS_ACTIONS),
+                'read_domains':list(READ_DOMAINS), 'guide':'business', **describe()},
             'system_write': False, 'status': 'needs_recovery' if recovering else 'needs_setup' if intent in {'finance', 'export'} and blocked else 'ready_for_discovery',
             'needed_inputs': next_steps[intent].get('needed_inputs', []), 'next_action': next_steps[intent],
             'parameter_cli': {'launcher': 'tools/reimbursement.cmd' if platform['os']=='win32' else 'bash tools/reimbursement.sh',
@@ -53,11 +60,13 @@ def capabilities(intent='materials'):
                              {'name':'workflow','default':'status','phases':['status','run','deliver','all','prepare-submit','submit'],
                               'inputs':['scenario','batch-index'],'submission_inputs':['submission-authorization','expected-userid','tab-id'],
                               'registered_case_inputs':['case-id'],
+                              'print_options':{'merge_pdf':False,'finance_only':True,'independent':True,'output_root':'required_or_registered','sequences':'optional'},
                               'registered_case_phases':list(REGISTERED_PHASES),
                               'registered_execute_default':'ready_to_applicant_pending_not_final_agreement',
                               'timeout_policy':'independent_saved_readback_before_resume'}],
                 'note':'参数命令复用同一正式实现；不替代专项核定、本人验证或尚未验收的PDF通道'},
             'workflow': [
+                {'step': '反馈、补件与材料复核', 'tools': ['reimbursement_material_review'], 'guide':'review', 'writes_finance':False},
                 {'step': '收件归档', 'tools': ['reimbursement_material_intake'], 'writes_finance': False},
                 {'step': 'OCR与文字回接', 'tools': ['reimbursement_ocr_status', 'reimbursement_material_ocr', 'reimbursement_material_ocr_resume'], 'writes_finance': False},
                 {'step': '规范', 'tools': ['reimbursement_standards_read', 'reimbursement_standards_select', 'reimbursement_standards_change']},
@@ -65,16 +74,25 @@ def capabilities(intent='materials'):
                 {'step': '选择案件', 'tools': ['reimbursement_cases', 'reimbursement_overview']},
                 {'step': '核对现场', 'tools': ['reimbursement_tabs', 'reimbursement_access']},
                 {'step': '上传、选票、建单', 'tools': ['reimbursement_invoice', 'reimbursement_invoice_selection', 'reimbursement_stage'],
-                 'requires': '本案身份、材料、金额与动作授权；未知结果先result/read_system'},
+                 'http_migration':'fixed_native_stages_amount_split_student_remuneration_workflow; source_bound_scopes; real_changed_save_acceptance_separate',
+                 'requires': '旧执行通道已禁止；先guide business核对已迁移动作，未知结果保留原任务'},
+                {'step':'学生劳务薪酬','tools':['reimbursement_access','reimbursement_read_system','reimbursement_record_result'],'guide':'remuneration','requires':'已核预算、原件、名单及当前原生身份；添加和建单均须独立回读'},
                 {'step': '提交与交付', 'tools': ['reimbursement_submission', 'reimbursement_read_system', 'reimbursement_pdf_export', 'reimbursement_pdf_export_inspect'],
                  'requires': '本人校验、审批、正式PDF和投递分别核实'}],
+            'applicant_batch': {'tool':'reimbursement_applicant_batch','manifest_schema':'ustc-applicant-http-batch-v1',
+                'registered_entry':'workflow --case-id 已登记批次 --phase approve --execute',
+                'sms':'自动读取服务器验证状态；需要时打开原单人工验证窗口，返回next_action；本人填写后同一调用续办',
+                'idempotency':'原单稳定请求号、pending先登记、独立流程日志回读；已同意跳过，未知只恢复原任务',
+                'metrics':['elapsed_seconds','mean_completed_submission_seconds','measured_new_submissions','human_wait_seconds','failed_job_observations'],
+                'scope':'明确授权的当前本人508节点，不创建新单、不代后续角色审批','guide':'quickstart'},
             'usage_groups': [
+                {'id':'review','title':'反馈工作台','entry':'material_review','finance_write':False},
                 {'id': 'intake', 'title': '收件与归档', 'entry': 'material_intake', 'finance_write': False},
                 {'id': 'ocr', 'title': '扫描识别与原件关联', 'entry': 'material_ocr', 'finance_write': False},
                 {'id': 'rules', 'title': '通用与专项规范', 'entry': 'standards_read', 'first_use': 'standards_init', 'finance_write': False},
                 {'id': 'planning', 'title': '材料与分单', 'entry': 'prepare_batch_file', 'finance_write': False},
                 {'id': 'finance', 'title': '财务办理与恢复', 'entry': 'cases → overview → enqueue', 'requires_local_adapter': True},
-                {'id': 'delivery', 'title': '明细PDF与列表交付', 'entry': 'workflow export-system / export-list', 'distinct_actions': True},
+                {'id': 'delivery', 'title': '正式打印、明细PDF与列表交付', 'entry': 'workflow print / export-system / export-list', 'distinct_actions': True},
             ],
             'scenario_modes': list(CASE_PROFILES),
             'rule_composition': {'field': 'extends', 'selection': 'explicit_registered_profile',

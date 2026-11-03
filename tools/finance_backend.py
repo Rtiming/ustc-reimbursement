@@ -24,6 +24,11 @@ def mac_native_enabled():
     return sys.platform == 'darwin' and backend() == 'edge_native_messaging'
 
 
+def bound_native_enabled():
+    """登记流水线在两平台都使用完整epoch和窗口；旧Windows单步入口仍保持原合同。"""
+    return backend() == 'edge_native_messaging' and (sys.platform == 'darwin' or bool(os.environ.get(NAMESPACE_ENV)))
+
+
 def native_namespace():
     value = os.environ.get(NAMESPACE_ENV, '')
     if not NM_NAMESPACE.fullmatch(value):
@@ -44,12 +49,11 @@ mac_target = native_target
 
 def transport_identity():
     selected = backend()
-    bound_native = selected == 'edge_native_messaging' and (sys.platform == 'darwin' or bool(os.environ.get(NAMESPACE_ENV)))
-    namespace = (native_namespace() if bound_native
+    namespace = (mac_namespace() if bound_native_enabled()
                  else 'edge-applescript' if selected == 'edge_applescript' else 'edge-native-messaging-windows')
     identity = {'backend': selected, 'tab_id_namespace': namespace, 'platform': sys.platform}
-    if bound_native:
-        identity['window_id'] = native_target()['expected_window_id']
+    if bound_native_enabled():
+        identity['window_id'] = mac_target()['expected_window_id']
     return identity
 
 
@@ -60,5 +64,8 @@ def assert_original_transport(receipt):
     if original is None:
         original = {'backend': 'edge_applescript', 'tab_id_namespace': 'edge-applescript', 'platform': 'darwin'} if sys.platform == 'darwin' else current
     if original != current:
+        from registered_page_owner import verify_marker_relocations, current_registered_marker_binding
+        if verify_marker_relocations(receipt, original, current) or current_registered_marker_binding(receipt,current):
+            return current
         raise ValueError('原回执浏览器通道或标签命名空间不同；保留原marker，不切换后端恢复或重放')
     return current

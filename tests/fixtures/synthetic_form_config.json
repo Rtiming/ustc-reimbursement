@@ -1,0 +1,83 @@
+{
+  "case_id": "synthetic_case",
+  "serial": "123456789",
+  "amount": "1000.00",
+  "basic": {
+    "teacher_id": "T0001",
+    "teacher_name": "测试教师",
+    "fields": {
+      "t-abst": "合成测试活动",
+      "t-req_mobile": "00000000000"
+    }
+  },
+  "funding": [
+    {
+      "code": "WC0000000001",
+      "amount": "900.00"
+    },
+    {
+      "code": "WW0000000002",
+      "amount": "100.00"
+    }
+  ],
+  "expense_allocations": [
+    {
+      "project": "WC0000000001",
+      "subject": "30211",
+      "budget": "A00001",
+      "amount": "800.00"
+    },
+    {
+      "project": "WC0000000001",
+      "subject": "30201",
+      "budget": "A00001",
+      "amount": "100.00"
+    },
+    {
+      "project": "WW0000000002",
+      "subject": "30211",
+      "budget": "A00001",
+      "amount": "100.00"
+    }
+  ],
+  "payments": [
+    {
+      "mode": "bank_transfer",
+      "name": "测试甲",
+      "person_id": "TEST001",
+      "amount": "300.00"
+    },
+    {
+      "mode": "bank_transfer",
+      "name": "测试乙",
+      "person_id": "TEST002",
+      "amount": "200.00"
+    },
+    {
+      "mode": "corporate_card",
+      "name": "测试丙",
+      "person_id": "TEST003",
+      "amount": "500.00",
+      "transaction": {
+        "date": "2026-01-01",
+        "merchant": "合成商户",
+        "card_suffix": "0000",
+        "search_amount": "500.00"
+      }
+    }
+  ],
+  "explanations": {
+    "general": "仅用于离线合成测试。",
+    "card_notes": [],
+    "record_only": true
+  },
+  "pre_review": [],
+  "review": {
+    "ordinary_promise_authorized": false,
+    "workflow_started": false
+  },
+  "contract": {
+    "exists": false
+  },
+  "fixture_note": "Entirely synthetic test input; not a real case or authorization."
+}

@@ -231,6 +231,7 @@ def main():
     parser.add_argument('--output', required=True, type=Path, help='新的.xlsx文件；prepare-only时为新的JSON文件')
     parser.add_argument('--prepare-only', action='store_true')
     parser.add_argument('--node', default='node', help='现有Node运行时，不自动安装')
+    parser.add_argument('--renderer', choices=['auto','native','artifact'], default='auto', help='默认使用可独立部署的本地渲染；显式创作运行时仍兼容')
     parser.add_argument('--module-root', type=Path, help='已配置的node_modules根，或在当前任务目录准备node_modules链接')
     parser.add_argument('--qa-dir', type=Path, help='全新视觉核验目录；为每张表保存可见列的预览')
     args = parser.parse_args()
@@ -255,6 +256,10 @@ def main():
         with manifest.open('x', encoding='utf-8') as stream:
             stream.write(json.dumps(plan, ensure_ascii=False, indent=2) + '\n')
         write_issue_summary(plan, args.output.parent)
+        if args.renderer=='native' or args.renderer=='auto' and not args.module_root and not args.qa_dir:
+            from checklist_native import render
+            print(json.dumps(render(manifest,args.output),ensure_ascii=False))
+            return
         command = [args.node, str(Path(__file__).with_suffix('.mjs')), '--input', str(manifest.resolve()), '--output', str(args.output.resolve()), '--python', sys.executable]
         if args.module_root: command += ['--module-root', str(args.module_root.resolve())]
         if args.qa_dir: command += ['--qa-dir', str(args.qa_dir.resolve())]

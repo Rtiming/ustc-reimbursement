@@ -8,7 +8,6 @@ from pathlib import Path
 from assistant_api import APIError, atomic_json, read_json
 from registered_session import RegisteredSession
 from registered_inputs import checked_reference
-from submission import view_plan
 
 
 def validate_entries(service, manifest, userid):
@@ -176,19 +175,6 @@ def run_system_pdfs(service, case_id, cfg, index, auth, *, execute=False, progre
         atomic_json(report_path, report)
         atomic_json(session.folder / 'current-pdf-result.json', report)
 
-    def job(case, operation, parameters, label, execute=False, stable=None):
-        return session.job(
-            case,
-            operation,
-            {**parameters, 'tab_id': session.state['tab_id']},
-            label,
-            execute,
-            request_id=stable,
-        )
-
-    def action(case, plan, name, stable=None):
-        return job(case, 'submission', {'action': name, 'plan': plan}, name, True, stable)
-
     checkpoint()
     try:
         reused = {}
@@ -220,38 +206,29 @@ def run_system_pdfs(service, case_id, cfg, index, auth, *, execute=False, progre
             )
             checkpoint()
             return report
-        # 一个工作页处理整批，和验证码页分别持有，不影响本人输入。
+        # 固定HTTP读取和明细生成共用登记页；不打开旧查看控件或恢复旧菜单。
+        session.ensure()
         first = value['cases'][0]['case_id']
-        session.begin_case(first)
-        job(
-            first,
-            'invoice_verification',
-            {'action': 'view', 'view': 'all-bills', 'expected_userid': userid},
-            'pdf-all-bills',
+        source, native = session.job(
+            first, 'business',
+            {'action': 'bills-list', 'expected_userid': userid, 'tab_id': session.state['tab_id']},
+            'pdf-http-bills-list',
         )
-        source, native = job(
-            first,
-            'invoice_verification',
-            {'action': 'full-grid', 'grid': '101', 'expected_userid': userid},
-            'pdf-all-bills-read',
-        )
-        if native.get('scopeComplete') is not True:
+        if (native.get('ok') is not True or native.get('complete') is not True
+                or not isinstance(native.get('rows'), list)
+                or len(native['rows']) != native.get('total_records')):
             raise APIError('system_pdf_list_incomplete', '本人单据列表尚未完整取得')
-        native_rows = {
-            r['t.serial_no']: r for g in native.get('grids', []) for r in g.get('rows', [])
-        }
+        native_rows = {r['t.serial_no']: r for r in native['rows']}
+        if len(native_rows) != len(native['rows']):
+            raise APIError('system_pdf_list_duplicate', '当前本人单据列表含重复单号')
         list_art = next(a for a in source['artifacts'] if a['name'] == 'output.json')
         report['source_list'] = {
-            'case_id': first,
-            'job_id': source['job_id'],
-            'artifact_id': list_art['artifact_id'],
-            'sha256': list_art['sha256'],
+            'case_id': first, 'job_id': source['job_id'],
+            'artifact_id': list_art['artifact_id'], 'sha256': list_art['sha256'],
         }
+        report['business_transport'] = 'native_http'
         for entry in value['cases']:
-            case = entry['case_id']
-            _, paths = service.resolve(case)
-            form = read_json(paths['form'])
-            plan = entry['export_plan']
+            case, plan = entry['case_id'], entry['export_plan']
             serial = plan['serial']
             row = {'case_id': case, 'serial': serial, 'status': 'running'}
             report['results'].append(row)
@@ -271,132 +248,47 @@ def run_system_pdfs(service, case_id, cfg, index, auth, *, execute=False, progre
                 checkpoint()
                 continue
             if saved and saved.get('phase') != 'retryable_view_preflight':
-                if session.state.get('last_case_id') != case:
-                    raise APIError(
-                        'system_pdf_original_view', '存在原查看任务，未自动重开；保留原job和工作页'
-                    )
-                raise APIError(
-                    'system_pdf_original_view',
-                    '原查看或下载任务未完整结束，需按保存阶段恢复；不换请求号重发',
-                )
+                raise APIError('system_pdf_original_view', '原查看或导出尚未确认，只核对原任务，不重发')
             if hashlib.sha256(manifest.read_bytes()).hexdigest() != fingerprint:
                 raise APIError('system_pdf_input_drift', '运行中导出清单变化')
             session.state['last_case_id'] = case
             atomic_json(session.state_path, session.state)
-            submission_plan = view_plan(form, userid, value['source'])
             attempt = saved.get('attempt', 1)
-            prefix = (
-                'system-pdf-'
-                + fingerprint[:12]
-                + '-'
-                + case
-                + ('-r' + str(attempt) if attempt > 1 else '')
-            )
-            atomic_json(
-                state_path,
-                {
-                    'phase': 'detail_open_requested',
-                    'request_id': prefix + '-open',
-                    'attempt': attempt,
-                },
-            )
-            action(case, submission_plan, 'detail-open', prefix + '-open')
-            for _ in range(15):
-                _, observed = action(case, submission_plan, 'system-print-read')
-                if observed.get('dialogs') or observed.get('pdf_ready'):
-                    break
-                time.sleep(0.2)
-            if observed.get('dialogs'):
-                atomic_json(
-                    state_path,
-                    {'phase': 'detail_continue_requested', 'request_id': prefix + '-continue'},
-                )
-                action(case, submission_plan, 'detail-continue', prefix + '-continue')
-            for _ in range(20):
-                _, observed = action(case, submission_plan, 'system-print-read')
-                if observed.get('pdf_ready'):
-                    break
-                if observed.get('dialogs'):
-                    raise APIError('system_pdf_native_dialog', '查看明细出现需处理的原生提示')
-                time.sleep(0.3)
-            else:
-                raise APIError('system_pdf_loading', '原生明细PDF未就绪，保留原页')
+            prefix = 'system-pdf-' + fingerprint[:12] + '-' + case
+            if attempt > 1:
+                prefix += '-r' + str(attempt)
+            request_id = prefix + '-http-export'
             Path(entry['export_root']).mkdir(parents=True, exist_ok=True)
-            request_id = prefix + '-export'
+            intent = {'phase': 'http_export_requested', 'request_id': request_id,
+                      'business_transport': 'native_http', 'attempt': attempt}
+            # 创建任务前先落稳定意图；崩溃后不能悄悄切换到新请求号。
+            atomic_json(state_path, intent)
+            def enqueued(queued):
+                intent['export_job_id'] = queued['job_id']
+                atomic_json(state_path, intent)
+            report['system_write_requested'] = True
+            checkpoint()
             job_result, result = session.job(
-                case,
-                'pdf_export',
-                {
-                    'export_plan': plan,
-                    'export_root': entry['export_root'],
-                    'tab_id': session.state['tab_id'],
-                    'expected_userid': userid,
-                    'silent': True,
-                },
-                'export-system-pdf',
-                True,
-                request_id=request_id,
-                on_enqueued=lambda queued: atomic_json(
-                    state_path,
-                    {
-                        'phase': 'export_requested',
-                        'export_job_id': queued['job_id'],
-                        'request_id': request_id,
-                    },
-                ),
+                case, 'pdf_export',
+                {'export_plan': plan, 'export_root': entry['export_root'],
+                 'tab_id': session.state['tab_id'], 'expected_userid': userid, 'silent': True},
+                'export-system-pdf-http', True, request_id=request_id, on_enqueued=enqueued,
             )
-            if result.get('ok') is not True or result.get('status') != 'ready':
-                raise APIError('system_pdf_export_pending', '原导出结果尚未完整，保留原job')
-            atomic_json(
-                state_path,
-                {'phase': 'exported', 'export_job_id': job_result['job_id'], 'pdf': result['pdf']},
-            )
-            row.update(
-                status='exported',
-                pdf=result['pdf'],
-                pdf_sha256=result['pdf_sha256'],
-                export_job_id=job_result['job_id'],
-            )
+            if (result.get('ok') is not True or result.get('status') != 'ready'
+                    or result.get('kind') != 'system_view_preview_not_final_print'
+                    or result.get('source_type') != 'native_business_api'
+                    or result.get('details_transport') != 'native_http'
+                    or result.get('approval_verified') is not False
+                    or result.get('final_print_verified') is not False):
+                raise APIError('system_pdf_export_pending', '原导出未完整核验或预览身份不符，保留原job')
+            atomic_json(state_path, {'phase': 'exported', 'export_job_id': job_result['job_id'],
+                                    'pdf': result['pdf'], 'business_transport': 'native_http'})
+            row.update(status='exported', pdf=result['pdf'], pdf_sha256=result['pdf_sha256'],
+                       export_job_id=job_result['job_id'], details_transport='native_http')
             checkpoint()
             if progress:
-                progress(
-                    {
-                        'event': 'system_pdf_exported',
-                        'case_id': case,
-                        'serial': serial,
-                        'pdf': result['pdf'],
-                    }
-                )
-            try:
-                action(case, submission_plan, 'detail-return', prefix + '-return')
-            except APIError as error:
-                if 'DETAIL_RETURN_PENDING_READ_ORIGINAL' not in str(error) or service.overview(
-                    case
-                ).get('unverified_write'):
-                    raise
-                # 文件已完整落盘。只恢复这个工具的只读工作页，不重发返回或下载。
-                session.begin_case(case)
-                job(
-                    case,
-                    'invoice_verification',
-                    {'action': 'view', 'view': 'all-bills', 'expected_userid': userid},
-                    'pdf-return-recovery',
-                )
-                _, refreshed = job(
-                    case,
-                    'invoice_verification',
-                    {'action': 'full-grid', 'grid': '101', 'expected_userid': userid},
-                    'pdf-return-recovery-list',
-                )
-                if refreshed.get('scopeComplete') is not True:
-                    raise APIError('system_pdf_return_list', '返回恢复后的列表未完整取得')
-                native_rows = {
-                    r['t.serial_no']: r
-                    for g in refreshed.get('grids', [])
-                    for r in g.get('rows', [])
-                }
-                row['read_only_page_recovered'] = True
-                checkpoint()
+                progress({'event': 'system_pdf_exported', 'case_id': case,
+                          'serial': serial, 'pdf': result['pdf']})
         report['state'] = 'completed_with_holds' if report['held_count'] else 'completed'
         checkpoint()
         return report

@@ -31,7 +31,8 @@ def normalize(source,output):
                     if v is not None and v.text in HEADERS:
                         columns[re.sub(r'\d+$','',c.get('r'))]=int(re.search(r'\d+$',c.get('r')).group())
                 for c in document.iter(T('c')):
-                    address=c.get('r','');match=re.fullmatch(r'([A-Z]+)(\d+)',address)
+                    address=c.get('r','')
+                    match=re.fullmatch(r'([A-Z]+)(\d+)',address)
                     if not match or match[1] not in columns or int(match[2])<=columns[match[1]]:continue
                     v=c.find(T('v'))
                     if v is None or not re.fullmatch(r'\d{16,100}',v.text or ''):continue

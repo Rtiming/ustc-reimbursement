@@ -37,13 +37,17 @@ def browser_lock():
         yield
 
 
-def read_marker(marker, tab_id=None, timeout=45):
+def read_marker(marker, tab_id=None, timeout=45, recovery_log=None):
     """桥接暂时阻塞时只重试读取同一标记，绝不重新注入原操作。"""
     if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout <= 0:
         raise ValueError('marker读取timeout须为有限正数')
-    deadline = time.monotonic() + timeout
+    started_at = time.monotonic()
+    deadline = started_at + timeout
     last_error = None
-    pause = .35
+    native_fast_read = (os.environ.get('REIMBURSEMENT_EDGE_BACKEND') == 'edge_native_messaging'
+                        or sys.platform == 'win32')
+    pause = .1 if native_fast_read else .35
+    relocated = False
     while True:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
@@ -57,16 +61,34 @@ def read_marker(marker, tab_id=None, timeout=45):
                 return json.loads(raw)
         except (RuntimeError, TimeoutError) as exc:
             last_error = str(exc)
+            if ('frozen_tab_not_woken' in last_error and not relocated
+                    and os.environ.get('REIMBURSEMENT_REGISTERED_SESSION') and deadline - time.monotonic() >= 30):
+                # The operation was already injected. Move only the registered
+                # original document, then read the same marker; never reinject.
+                from registered_page_owner import RegisteredPageOwner
+                owner = RegisteredPageOwner.from_state_path(os.environ['REIMBURSEMENT_REGISTERED_SESSION'], tab_id)
+                old_window = owner.state['window_id']
+                owner.recover_frozen()
+                relocated = True
+                if recovery_log is not None:
+                    proof_path = owner.state.get('last_relocation_receipt')
+                    recovery_log.append({'old_window_id': old_window, 'window_id': owner.state['window_id'],
+                        'receipt': proof_path,
+                        'receipt_sha256': hashlib.sha256(Path(proof_path).read_bytes()).hexdigest() if proof_path else None,
+                        'tab_id': tab_id,
+                        'original_marker': marker, 'script_reexecuted': False})
+                continue
             # 只有传输超时可重读；权限关闭、异标签等错误不靠重试解决。
             if '-1712' not in last_error and 'timeout' not in last_error.lower():
                 raise
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise TimeoutError(last_error or 'Finance script timed out; original marker retained')
-        # The first read is immediate. Slow pages get progressively fewer
-        # AppleEvents; the original marker and absolute budget never change.
+        # 原生桥前10秒缩短完成检测尾延迟；长等待继续退避，AppleEvent预算不变。
+        # 这里只重读原marker，不增加学校请求或重新派发原业务。
         time.sleep(min(pause, remaining))
-        pause = min(1.5, pause * 1.5)
+        cap = .2 if native_fast_read and time.monotonic() - started_at < 10 else 1.5
+        pause = min(cap, pause * 1.5)
 
 
 def main_unlocked(lock_browser=False):
@@ -149,7 +171,8 @@ def main_unlocked(lock_browser=False):
                     raise
             record.update(phase='await_original_marker', injection_acknowledged=started, injection_transport_error=injection_error)
             checkpoint()
-            data = read_marker(marker, args.tab_id, args.timeout)
+            recovery_log = record.setdefault('marker_recoveries', [])
+            data = read_marker(marker, args.tab_id, args.timeout, recovery_log=recovery_log)
             record.update(executed_at_utc=datetime.now(timezone.utc).isoformat(), phase='script_completed', result=data)
             checkpoint()
             completed = True

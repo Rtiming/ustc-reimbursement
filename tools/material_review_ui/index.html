@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>材料核对工作台</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div>
+        <h1 id="app-title">材料核对工作台</h1>
+        <p id="summary">正在读取本地材料索引…</p>
+      </div>
+      <div class="top-actions">
+        <span class="local-label">本机工作台</span
+        ><button id="inbox-open">反馈总览</button><button id="export-open">整理与导出</button
+        ><button id="refresh">刷新记录</button><button id="finish-session">结束使用</button>
+      </div>
+    </header>
+    <div id="notice" role="status" aria-live="polite"></div>
+    <div class="shell">
+      <aside class="sidebar">
+        <label for="search">查找事项、票号或材料</label
+        ><input
+          id="search"
+          type="search"
+          placeholder="序号、社团、活动、完整票号…"
+        /><label for="queue">办理队列</label
+        ><select id="queue">
+          <option value="">全部事项</option>
+        </select>
+        <p id="list-count"></p>
+        <nav id="items" aria-label="事项清单"></nav>
+      </aside>
+      <main id="main">
+        <p>首次访问请使用本案的“打开材料核对工作台”入口。</p>
+      </main>
+    </div>
+    <dialog id="image-dialog">
+      <div class="dialog-bar">
+        <span id="zoom-title"></span><button id="close-dialog">关闭</button>
+      </div>
+      <img id="zoom-image" alt="材料整页放大" />
+    </dialog>
+    <dialog id="export-dialog">
+      <div class="dialog-bar">
+        <h2>整理与导出</h2>
+        <button id="export-close">关闭</button>
+      </div>
+      <div class="export-options"><label
+        >交付用途<select id="export-mode" aria-label="交付用途">
+          <option value="pdf">PDF文件 · 直接打开查看</option>
+          <option value="materials">材料浏览包 · 解压直接查看</option>
+          <option value="feedback">问题反馈草稿 · 按问题附证据</option>
+          <option value="handoff">经办接续包 · 继续记录和补件</option>
+        </select></label
+      ><label
+        >事项范围<select id="export-scope" aria-label="事项范围">
+          <option value="all">全部事项</option>
+          <option value="item">当前事项</option>
+        </select></label
+      ></div>
+      <div id="export-filters">
+        <label>社团<select id="export-club" aria-label="社团"></select></label>
+        <label>问题进度<select id="export-status" aria-label="问题进度">
+          <option value="pending">待处理（默认，不含已答复）</option>
+          <option value="replied">已答复待复核</option>
+          <option value="waiting_materials">等待补充材料</option>
+          <option value="before_submit">提交前待办</option>
+          <option value="hold">暂缓</option>
+          <option value="all">全部未关闭问题</option>
+        </select></label>
+        <p class="muted">默认只选需要对外反馈的待处理问题。切换筛选会按新范围重新勾选，可逐条取消；内部核实项不进入对外包。</p>
+        <div class="toolbar"><button id="export-select-all">全选筛选结果</button><button id="export-select-none">清空选择</button></div>
+        <div id="export-issues"></div>
+      </div>
+      <p id="export-description"></p>
+      <p class="muted">
+        导出只生成文件；收到补件仍需复核。整理期间若记录更新，会停止并提示重试。
+      </p>
+      <button id="export-download" class="primary">整理并下载</button>
+    </dialog>
+    <script src="/app.js"></script>
+  </body>
+</html>

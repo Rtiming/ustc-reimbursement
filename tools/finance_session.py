@@ -33,11 +33,17 @@ PAGE_HEALTH_BODY = r'''(()=>{
     navigationReady:typeof f.contentWindow.pageOpen==='function'};
   }catch(e){frame={unreadable:true,error:e.name};}
  }
+ const nativeCalls=typeof performance==='undefined'?[]:performance.getEntriesByType('resource').filter(e=>{try{const u=new URL(e.name);return u.origin===location.origin&&['/YBX/commonUpdate_responseButtonEvent.action','/YBX/common_callProc.action','/YBX/commonQuery_doQuery.action'].includes(u.pathname);}catch(_){return false;}});
+ const last=nativeCalls[nativeCalls.length-1];
  return{origin:location.origin,pathname:location.pathname,
   documentState:document.readyState,
   project:window.$?.getProjID?.()||null,
   userid:window.$?.UC?.bindData?.('#0-userinfo.userid#')||null,
-  serial:window.$?.UC?.bindData?.('#61-serialno#')||null,frame};
+  serial:window.$?.UC?.bindData?.('#61-serialno#')||null,frame,
+  node:String(window.$?.UC?.bindData?.('#61-node_id#')||''),
+  activeRequests:Number(window.$?.active||0),
+  applicantAgreementVisible:[...(document.querySelectorAll?.('.foot_winWF_YBX_76 button[btnname="同意"]')||[])].filter(e=>e.getClientRects().length&&!e.disabled).length===1,
+  lastNativeRequest:last?{path:new URL(last.name).pathname,status:last.responseStatus??null}:null};
 })()'''
 
 # Edge的AppleScript脚本环境看得到DOM，但不一定看得到页面的$。
@@ -57,6 +63,8 @@ def classify_page_health(value, expected_userid):
         return 'wrong_page'
     if value.get('userid') != expected_userid:
         return 'identity_mismatch'
+    if (value.get('lastNativeRequest') or {}).get('status') in [401,403,404]:
+        return 'native_backend_unavailable'
     frame = value.get('frame')
     if frame is None:
         return 'main_readable'
@@ -94,6 +102,16 @@ def check_page(case_id, tab_id, expected_userid, output):
         record['preview_ready'] = record['state'] == 'preview_ready'
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
         record.update(ok=False, state='transport_unavailable', error=str(error)[:500])
+        if 'No matching finance tab' in str(error):
+            # 固定业务页过滤拒绝首页/登录壳不代表桥断开；只读原生地址，不放宽业务脚本范围。
+            from finance_access import tab_origin
+            try:
+                location = tab_origin(str(tab_id))
+                record['tab_location'] = location
+                if not location['allowed_origin'] or location.get('known_path') != '/YBX/main.jsp':
+                    record['state'] = 'wrong_page'
+            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+                pass
     record['elapsed_seconds'] = round(time.monotonic()-started, 3)
     if mac_native_enabled():
         record['lock_state_after'] = lock_state()
@@ -105,6 +123,7 @@ def check_page(case_id, tab_id, expected_userid, output):
         'preview_ready':'预览身份和栏目入口已加载；继续独立核对本案票数/金额，仍不证明保存或提交',
         'preview_not_loaded':'主页面可读、预览未加载；定位页面或连接故障，停止反复大快照/换请求重试',
         'transport_unavailable':'固定页短探针失败；停止该页重复读取，保留原写入意图，恢复连接后核对原单',
+        'wrong_page':'标签仍在首页、登录页或其他页面；沿access检查原入口回执，采用实际返回的财务tab_id，不向该页重发业务',
     }.get(record['state'], '页面或身份未就绪；不填写、不重放业务，先核对本案与当前登录')
     write(output, record)
     return record
@@ -592,7 +611,10 @@ end timeout'''.replace('WINDOW_ID',json.dumps(window_id)).replace('TAB_ID',json.
 
 def wake(case_id, request_id, tab_id, output):
     """仅在Edge后台时唤醒已有固定财务页并恢复原标签；不执行页面脚本或重发业务。"""
-    if sys.platform == 'win32' or mac_native_enabled():
+    if mac_native_enabled():
+        from finance_page_recovery import recover_native_page
+        return recover_native_page(case_id,request_id,tab_id,output)
+    if sys.platform == 'win32':
         raise RuntimeError('Windows原生扩展不切换标签唤醒；先check-page检查连接，再恢复原marker')
     if not re.fullmatch(r'[a-z][a-z0-9_-]{1,63}',case_id) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,95}',request_id) or not re.fullmatch(r'[0-9]+',tab_id):raise ValueError('须有合法案件、请求和标签ID')
     output=Path(output)
@@ -630,6 +652,7 @@ def main():
     p.add_argument('--case-id', required=True); p.add_argument('--request-id')
     p.add_argument('--expected-userid')
     p.add_argument('--allow-foreground-open', action='store_true', help='仅新开页允许原生短暂置前；其他财务动作仍后台')
+    p.add_argument('--separate-window',action='store_true',help='Mac新建独立财务窗口，保留原窗口与标签，恢复沿原模式')
     p.add_argument('--tab-id'); p.add_argument('--output', type=Path, required=True)
     p.add_argument('--receipt', type=Path)
     a = p.parse_args()
@@ -637,12 +660,13 @@ def main():
     if (a.action == 'check-page') != bool(a.expected_userid): p.error('check-page须有预期登录人；其他动作不接受该参数')
     if (a.action in ['recover-interface','verify-background']) != bool(a.receipt): p.error('恢复/核验仅引用原回执，创建不接任意 receipt')
     if a.allow_foreground_open and a.action not in ['new-interface','recover-interface']: p.error('开页开关不能用于其他动作')
+    if a.separate_window and a.action not in ['new-interface','recover-interface']:p.error('独立窗口仅用于新开页或恢复原开页意图')
     if a.action not in ['new-interface','recover-interface'] and not a.tab_id: p.error('此动作须有明确标签ID')
     with browser_lock():
         if a.action == 'check-page':r=check_page(a.case_id,a.tab_id,a.expected_userid,a.output)
         elif a.action=='new-interface' or (a.action=='recover-interface' and json.loads(a.receipt.read_text()).get('schema')=='ustc-finance-page-open-v2'):
             from finance_page_open import open_page
-            r=open_page(a.case_id,a.request_id,a.tab_id,a.output,a.receipt,silent=not a.allow_foreground_open)
+            r=open_page(a.case_id,a.request_id,a.tab_id,a.output,a.receipt,silent=not a.allow_foreground_open,separate_window=a.separate_window)
         elif a.action=='prepare-background':r=prepare_background(a.case_id,a.request_id,a.tab_id,a.output)
         elif a.action=='verify-background':r=verify_background(a.case_id,a.request_id,a.tab_id,a.output,a.receipt)
         elif a.action=='wake-interface':r=wake(a.case_id,a.request_id,a.tab_id,a.output)

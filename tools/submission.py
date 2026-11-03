@@ -4,7 +4,8 @@ import re
 from pathlib import Path
 from validate_config import money
 
-ACTIONS = ['inspect', 'status', 'status-readback', 'print-inspect', 'template-inspect', 'detail-open', 'detail-continue', 'detail-return', 'grid-export-menu', 'grid-export-execute', 'system-print-open', 'system-print-choice', 'system-print-read', 'system-print-dismiss', 'applicant-open', 'verification-cancel', 'applicant-return', 'dismiss-validation', 'delivery-open', 'options', 'next', 'promise', 'department', 'applicant-agree']
+ACTIONS = ['applicant-inspect','applicant-readback','applicant-recover','applicant-refresh','applicant-documents','inspect', 'status', 'status-readback', 'print-inspect', 'print-api-inspect', 'print-api-status', 'template-inspect', 'detail-open', 'detail-continue', 'detail-return', 'grid-export-menu', 'grid-export-execute', 'system-print-open', 'system-print-choice', 'system-print-read', 'system-print-status', 'system-print-dismiss', 'applicant-open', 'verification-cancel', 'applicant-return', 'dismiss-validation', 'delivery-open', 'options', 'next', 'promise', 'department', 'applicant-agree']
+ACTIONS += ['workflow-inspect','applicant-prepare','workflow-readback','workflow-recover','options-recover']
 WRITE_ACTIONS = ['options', 'next', 'promise', 'department', 'applicant-agree']
 
 def view_plan(form, expected_userid, source):
@@ -24,10 +25,10 @@ def view_plan(form, expected_userid, source):
     validate_plan(plan, form)
     return plan
 
-def validate_plan(plan, form):
+def validate_plan(plan, form, *, require_submit_authority=True):
     if any(plan.get(k) != form.get(k) for k in ['case_id', 'serial']) or money(plan['amount']) != money(form['amount']):
         raise ValueError('提交计划案件、单号或金额不符')
-    if plan.get('submit_authorized') is not True or not plan.get('source'):
+    if (require_submit_authority and plan.get('submit_authorized') is not True) or not plan.get('source'):
         raise ValueError('提交须有本案用户明确授权')
     if plan.get('summary') != form['basic']['fields']['t-abst'] or plan.get('phone') != form['basic']['fields']['t-req_mobile']:
         raise ValueError('提交摘要或电话与本案已核验输入不符')
@@ -50,16 +51,21 @@ def validate_plan(plan, form):
     return {'ok': True, 'case_id': form['case_id'], 'serial': form['serial'], 'system_write': False}
 
 def script(form, plan, action, manifest=None):
+    if action in ('print-api-inspect','print-api-status'):
+        if not re.fullmatch(r'[A-Za-z0-9]{2,40}',plan.get('expected_userid') or ''):raise ValueError('打印接口必须绑定账号')
+        config={'action':action.removeprefix('print-api-'),'case_id':form['case_id'],'serial':form['serial'],'expected_userid':plan.get('expected_userid')}
+        from finance_http import source
+        return '(async()=>{'+source('print')+';return await reimbursementPrintApi('+json.dumps(config,ensure_ascii=False)+');})()'
     if action=='status-readback':
         route=script(form,plan,'status',manifest)
         reader=(Path(__file__).parent/'actions/read_current_state.js').read_text()
         return '(async()=>{await '+route+';return await '+reader+';})()'
-    if action in ('detail-open','detail-continue','detail-return','grid-export-menu','grid-export-execute','system-print-open','system-print-choice','system-print-read','system-print-dismiss'):
+    if action in ('detail-open','detail-continue','detail-return','grid-export-menu','grid-export-execute','system-print-open','system-print-choice','system-print-read', 'system-print-status','system-print-dismiss'):
         if not re.fullmatch(r'[A-Za-z0-9]{2,40}',plan.get('expected_userid') or ''):raise ValueError('系统打印须明确当前账号')
-        if action not in ('system-print-read','detail-open','detail-continue','detail-return','grid-export-menu','grid-export-execute') and (plan.get('print_export_authorized') is not True or plan.get('include_invoice_attachments') is not False):
-            raise ValueError('本入口只接受本案明确导出系统单且附件另行整理的授权')
+        if action not in ('system-print-read', 'system-print-status','detail-open','detail-continue','detail-return','grid-export-menu','grid-export-execute') and (plan.get('print_export_authorized') is not True or type(plan.get('include_invoice_attachments')) is not bool):
+            raise ValueError('正式打印须明确本案导出授权及附件布尔选项')
         source=Path(__file__).with_suffix('.js').read_text()+'\n'+(Path(__file__).parent/'system_print.js').read_text()
-        method={'detail-open':'details','detail-continue':'detailContinue','detail-return':'detailReturn','grid-export-menu':'exportMenu','grid-export-execute':'exportExecute','system-print-open':'open','system-print-choice':'choose','system-print-read':'read','system-print-dismiss':'dismiss'}[action]
+        method={'detail-open':'details','detail-continue':'detailContinue','detail-return':'detailReturn','grid-export-menu':'exportMenu','grid-export-execute':'exportExecute','system-print-open':'open','system-print-choice':'choose','system-print-read':'read','system-print-status':'status','system-print-dismiss':'dismiss'}[action]
         args=json.dumps(form,ensure_ascii=False)+','+json.dumps(plan,ensure_ascii=False)
         return '(async()=>{\n'+source+'\nReimbursementSubmission.configure('+args+');ReimbursementSystemPrint.configure('+args+');return await ReimbursementSystemPrint.'+method+'();})()'
     methods = {'inspect': 'inspect', 'status':'submissionStatus', 'print-inspect':'printInspect', 'template-inspect':'templateInspect', 'applicant-open':'applicantOpen', 'verification-cancel':'verificationCancel', 'applicant-return':'applicantReturn', 'dismiss-validation':'dismissValidation', 'delivery-open': 'deliveryOpen', 'options':'options', 'next':'next', 'promise':'promise', 'department':'department', 'applicant-agree':'applicantAgree'}
@@ -74,6 +80,9 @@ def script(form, plan, action, manifest=None):
                 or not re.fullmatch(r'[A-Za-z0-9]{2,40}', plan.get('expected_userid') or '')
                 or form.get('review', {}).get('workflow_status') != 'applicant_review_pending'):
             raise ValueError('本人同意仅支持本案明确授权、当前申请人508节点及意见同意')
+    if form.get('system_mode')=='remuneration'and action in ['options','next']:
+        from finance_remuneration_submission import script as payroll_script
+        return payroll_script(form,plan,action)
     config = dict(form)
     if action == 'status' and not re.fullmatch(r'[A-Za-z0-9]{2,40}', plan.get('expected_userid') or ''):
         raise ValueError('提交状态导航须明确当前账号')
@@ -238,6 +247,40 @@ def verify_next(result, serial):
         raise ValueError('原生下一步后未到本人承诺页面')
     return {'ok': True, 'promise_page': True}
 
+
+def verify_next_still_draft(previous, readback, form):
+    """下一步结果未回显时，用重新查询的同号草稿证明尚未发起流程。"""
+    import hashlib
+    from datetime import datetime
+    if previous.get('operation')!='submission:next' or form.get('review',{}).get('workflow_started'):
+        raise ValueError('仅接续未发起流程的下一步')
+    binding=previous.get('verification',{})
+    original=json.loads(Path(binding['save_receipt']).read_text())
+    plan=json.loads(Path(binding['submission_plan']).read_text());validate_plan(plan,form)
+    raw=Path(original['script']).read_bytes();body=original.get('result',{})
+    if (original.get('phase')!='script_completed' or body.get('ok') is not True or body.get('action')!='submission_next'
+            or body.get('serial')!=form['serial'] or hashlib.sha256(raw).hexdigest()!=original.get('source_sha256')
+            or readback.get('phase')!='script_completed'
+            or datetime.fromisoformat(readback['executed_at_utc'])<=datetime.fromisoformat(original['executed_at_utc'])):
+        raise ValueError('须有原下一步完成回执和更晚的独立列表')
+    r=readback.get('result',{});grids=[g for g in r.get('grids',[])if str(g.get('funcno'))=='101']
+    if (r.get('ok') is not True or r.get('projid')!='WF_YBX' or r.get('serial') or r.get('visibleDialogs')
+            or r.get('scopeComplete') is not True or r.get('identity',{}).get('userid')!=plan.get('expected_userid')
+            or not plan.get('expected_userid') or len(grids)!=1 or grids[0].get('loading')
+            or grids[0].get('records')!=len(grids[0].get('rows',[]))):
+        raise ValueError('须当前账号完整原生草稿列表')
+    rows=[x for x in grids[0]['rows']if x.get('t.serial_no')==form['serial']]
+    if len(rows)!=1:raise ValueError('未找到唯一原单')
+    row=rows[0]
+    if (row.get('t.status')!='-99' or row.get('t.status_name')!='草稿'
+            or any(row.get(k)for k in ['t.node_id','t.req_no','t.basetable_key','t.wf_name','t.uni_key','t.log_id'])
+            or row.get('t.REQ_INFO','').split('-',1)[0]!=plan['expected_userid']
+            or row.get('t.abst')!=plan['summary']
+            or money(row.get('t.total_amt','').replace(',',''))!=money(plan['amount'])):
+        raise ValueError('原单不再是同人同额且未发起流程的草稿')
+    return {'ok':True,'state':'original_draft_without_workflow','serial':form['serial'],
+            'workflow_started':False,'original_request_preserved':True}
+
 def verify_applicant_ready(result, serial, expected_userid):
     if (not expected_userid or result.get('serial') != serial or result.get('projid') != 'WF_YBX'
             or str(result.get('node')) != '508' or result.get('identity', {}).get('userid') != expected_userid
@@ -284,16 +327,27 @@ def verify_sms_gate(result, serial, userid):
 
 
 def verify_applicant_prepared_list(result, serial, userid, amount):
+    from finance_bill_state import bound_bill, is_http_snapshot
+    if is_http_snapshot(result):
+        row = bound_bill(result, serial, userid, amount)
+        if row.get('t.status') != '-2' or row.get('t.lc_finish') != 'F':
+            raise ValueError('原生列表未处于审批中状态')
+    else:
+        row = _legacy_list_row(result, serial, userid, amount)
+    if str(row.get('t.node_id'))!='508' or not str(row.get('t.REQ_INFO',row.get('t.req_info',''))).startswith(userid+'-'):
+        raise ValueError('同号原单未证实处于当前本人申请人508节点')
+    return {'ok':True,'applicant_ready_verified':True,'approval_completed':False,'payment_completed':False}
+
+
+def _legacy_list_row(result, serial, userid, amount):
+    """历史回执恢复兼容；新的HTTP结果不伪造成DOM表格。"""
     if result.get('projid')!='WF_YBX' or result.get('identity',{}).get('userid')!=userid:
         raise ValueError('待本人批准列表账号或项目不同')
     rows=[r for g in result.get('grids',[]) if g.get('visible') and not g.get('loading')
           for r in g.get('rows',[]) if str(r.get('t.serial_no','')).strip()==serial]
     if len(rows)!=1 or money(str(rows[0].get('t.total_amt','')).replace(',',''))!=money(amount):
         raise ValueError('待本人批准列表未唯一读到同号同金额原单')
-    row=rows[0]
-    if str(row.get('t.node_id'))!='508' or not str(row.get('t.REQ_INFO',row.get('t.req_info',''))).startswith(userid+'-'):
-        raise ValueError('同号原单未证实处于当前本人申请人508节点')
-    return {'ok':True,'applicant_ready_verified':True,'approval_completed':False,'payment_completed':False}
+    return rows[0]
 
 
 def verify_department(result, serial, expected, amount=None, expected_userid=None):
@@ -320,13 +374,13 @@ def verify_department(result, serial, expected, amount=None, expected_userid=Non
 
 
 def verify_applicant_agreement(result, serial, expected_userid, amount, expected_prover=None):
-    if result.get('projid') != 'WF_YBX' or result.get('identity', {}).get('userid') != expected_userid:
-        raise ValueError('本人同意后回读系统或账号变化')
-    rows = [row for grid in result.get('grids', []) if grid.get('visible') and not grid.get('loading')
-            for row in grid.get('rows', []) if str(row.get('t.serial_no', '')).strip() == serial]
-    if len(rows) != 1 or money(str(rows[0].get('t.total_amt', '')).replace(',', '')) != money(amount):
-        raise ValueError('本人同意后须独立读到唯一同号、同金额单据')
-    row = rows[0]
+    from finance_bill_state import bound_bill, is_http_snapshot
+    if is_http_snapshot(result):
+        row = bound_bill(result, serial, expected_userid, amount)
+        if row.get('t.status') != '-2' or row.get('t.lc_finish') != 'F':
+            raise ValueError('原生列表未处于审批中状态')
+    else:
+        row = _legacy_list_row(result, serial, expected_userid, amount)
     statuses = [str(row.get(k, '')) for k in ('t.status_name', 't.status_name_dtl', 't.status_code_name', 't.flow_status')]
     native_prover = (row.get('t.status') == '-2' and row.get('t.node_id') == '449'
                     and row.get('t.project_id') == 'WF_YBX' and row.get('t.wf_name') == 'YBX_LC'

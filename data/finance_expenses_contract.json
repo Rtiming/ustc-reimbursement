@@ -1,0 +1,9 @@
+{
+  "schema": "ustc-expenses-http-contract-v1",
+  "definition_sha256": "5041c21f5b6371f6f77f8868ecb6df74d34cd86a134ae74d9799a610fa677679",
+  "winno": "216",
+  "funcno": "307",
+  "save_button": "ED8B3D462316467E9F69E4E305414508",
+  "native_source": "school WF_YBX W216 and grid.fn.getDataByColumns; checked 2026-10-28",
+  "write_route": "stage/expenses"
+}

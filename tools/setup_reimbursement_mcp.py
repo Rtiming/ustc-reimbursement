@@ -126,6 +126,10 @@ def setup(check_only=False, with_materials=False, material_roots=None, with_ocr=
     pip_options = (
         ['--index-url', 'https://pypi.org/simple', '--only-binary', ':all:'] if portable else []
     )
+    if portable and (PROJECT / 'offline').exists():
+        from offline_runtime import verify
+        offline = verify(PROJECT)
+        pip_options = ['--no-index', '--find-links', offline['wheels'], '--only-binary', ':all:']
     if not check_only:
         local.mkdir(exist_ok=True)
         if not python.exists():
@@ -264,21 +268,62 @@ def setup(check_only=False, with_materials=False, material_roots=None, with_ocr=
     args = [str(PROJECT / 'tools/reimbursement_mcp.py'), '--workspace', str(PROJECT)]
     for root in roots:
         args.extend(['--material-root', str(root)])
-    expected_configs = client_configuration(python, args, PROJECT)
+    q = lambda x: json.dumps(x, ensure_ascii=False)
+    dsh_patch = (
+        '- insert:\n    - id: reimbursement-project\n      name: "@deepseek-ai/dsh-mcp-client"\n      config:\n'
+        '        serverName: ustc_reimbursement\n        transport: stdio\n        command: '
+        + q(str(python)) + '\n        args: ' + q(args + ['--toolset','compact']) + '\n        cwd: ' + q(str(PROJECT))
+        + '\n        toolCallTimeoutMs: 30000\n'
+    )
+    shell_prefix = '#!/bin/sh\nset -eu\nREIMBURSE_TOOL_ROOT=$(CDPATH= cd -P -- "$(dirname -- "$0")/../.." && pwd -P)\ncd "$REIMBURSE_TOOL_ROOT"\n'
+    launchers = {
+        '打开报销工作台.command': shell_prefix + 'exec "$REIMBURSE_TOOL_ROOT/.local/mcp-venv/bin/python" "$REIMBURSE_TOOL_ROOT/tools/operator_workbench.py" --open\n',
+        '打开报销工作台.cmd': '@echo off\r\nchcp 65001 >nul\r\nset "REIMBURSE_TOOL_ROOT=%~dp0..\\.."\r\nif not exist "%REIMBURSE_TOOL_ROOT%\\.local\\mcp-venv\\Scripts\\pythonw.exe" (echo 请先运行安装与自检。 & pause & exit /b 2)\r\nstart "" "%REIMBURSE_TOOL_ROOT%\\.local\\mcp-venv\\Scripts\\pythonw.exe" "%REIMBURSE_TOOL_ROOT%\\tools\\operator_workbench.py" --open\r\n',
+        '打开反馈台.command': shell_prefix + 'exec sh "$REIMBURSE_TOOL_ROOT/tools/reimbursement.sh" material-review open --port 0\n',
+        '打开反馈台.cmd': '@echo off\r\nchcp 65001 >nul\r\ncall "%~dp0..\\..\\tools\\reimbursement.cmd" material-review open --port 0\r\nif errorlevel 1 pause\r\n',
+        '启动DSH助手.command': shell_prefix + 'command -v dsh >/dev/null 2>&1 || { printf "%s\\n" "请先安装DSH并配置自己的模型，再重开此入口。"; exit 2; }\nexec dsh --profile web --patch "$REIMBURSE_TOOL_ROOT/.local/client-configs/dsh.patch.yml"\n',
+        '启动DSH助手.cmd': '@echo off\r\nchcp 65001 >nul\r\nwhere dsh >nul 2>nul\r\nif errorlevel 1 (echo 请先安装DSH并配置自己的模型，再重开此入口。 & pause & exit /b 2)\r\ncd /d "%~dp0..\\.."\r\ncall dsh --profile web --patch "%~dp0dsh.patch.yml"\r\n',
+    }
     if sdk_ready and not check_only:
+        command = {'command': str(python), 'args': args, 'cwd': str(PROJECT)}
+        atomic_json(config_dir / 'mcp.json', {'mcpServers': {'ustc_reimbursement': command}})
+        atomic_json(config_dir / 'mcp-compact.json', {'mcpServers': {'ustc_reimbursement': {**command, 'args':args+['--toolset','compact']}}})
         config_dir.mkdir(parents=True, exist_ok=True)
-        for name, text in expected_configs.items():
-            if name == 'mcp.json':
-                atomic_json(config_dir / name, json.loads(text))
-            else:
-                (config_dir / name).write_text(text, encoding='utf-8')
+        (config_dir / 'codex.toml').write_text(
+            '[mcp_servers.ustc_reimbursement]\ncommand = '
+            + q(str(python))
+            + '\nargs = '
+            + q(args)
+            + '\ncwd = '
+            + q(str(PROJECT))
+            + '\n',
+            encoding='utf-8',
+        )
+        (config_dir / 'dsh.patch.yml').write_text(dsh_patch, encoding='utf-8')
+        for name, content in launchers.items():
+            target = config_dir / name
+            target.write_bytes(content.encode('utf-8'))
+            if name.endswith('.command'):
+                target.chmod(0o755)
         source = PROJECT / 'skills/ustc-reimbursement'
         for host in ['.agents', '.dsh']:
             dest = PROJECT / host / 'skills/ustc-reimbursement'
             # 共享入口已指向正本时保留软链接；其他入口复制完整技能包。
             if dest.resolve() != source.resolve():
                 shutil.copytree(source, dest, dirs_exist_ok=True)
-    config_current = client_configuration_matches(config_dir, expected_configs)
+    config_current = False
+    if all(Path(p).exists() for p in config_files.values()):
+        saved = json.loads((config_dir / 'mcp.json').read_text(encoding='utf-8'))['mcpServers'][
+            'ustc_reimbursement'
+        ]
+        config_current = (
+            saved.get('command') == str(python)
+            and saved.get('args') == args
+            and saved.get('cwd') == str(PROJECT)
+            and (config_dir / 'dsh.patch.yml').read_text(encoding='utf-8') == dsh_patch
+            and all((config_dir / name).is_file() and (config_dir / name).read_bytes() == content.encode('utf-8')
+                    for name, content in launchers.items())
+        )
     ready = (
         sdk_ready
         and config_current
@@ -301,6 +346,7 @@ def setup(check_only=False, with_materials=False, material_roots=None, with_ocr=
         'runtime_python': str(python),
         'transport': 'stdio',
         'client_config_files': config_files,
+        'user_entrypoints': {name: str(config_dir / name) for name in launchers},
         'materials_requested': with_materials,
         'ocr_requested': ocr_requested,
         'ocr': ocr,

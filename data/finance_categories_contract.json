@@ -1,0 +1,21 @@
+{
+  "schema": "ustc-native-categories-contract-v1",
+  "definition_sha256": "c768f225fa4ec66daa5ff3e532d113286545a310bd441f365a7812625421b8e5",
+  "select_button": "081B980021434FE995F700AF46A52BCA",
+  "save_button": "A5264E38A1684C919947221E224941A9",
+  "query": {
+    "columns": [
+      "t.cz",
+      "t.title_pc",
+      "t.jj_subjname",
+      "t.description",
+      "t.amt",
+      "t.jj_subj",
+      "t.tk_guids",
+      "t.select_flag",
+      "t.xtype",
+      "t.jump_web"
+    ],
+    "tablenames": "@{ybx_query_pc_package.wfp_query_bx_tks_v1:#61-serialno#;#61-xtype#;#0-userinfo.userid#;#61-xtype_order#}@ t"
+  }
+}

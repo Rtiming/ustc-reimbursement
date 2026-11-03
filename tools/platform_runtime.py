@@ -303,6 +303,7 @@ class WindowsJob:
             'AssignProcessToJobObject': ([wt.HANDLE, wt.HANDLE], wt.BOOL),
             'TerminateJobObject': ([wt.HANDLE, wt.UINT], wt.BOOL),
             'OpenProcess': ([wt.DWORD, wt.BOOL, wt.DWORD], wt.HANDLE),
+            'WaitForSingleObject': ([wt.HANDLE, wt.DWORD], wt.DWORD),
             'CloseHandle': ([wt.HANDLE], wt.BOOL),
         }
         for name, (args, result) in signatures.items():
@@ -326,11 +327,44 @@ class WindowsJob:
         finally:
             self.api.CloseHandle(handle)
 
+    def process_handles(self):
+        """终止前保存本Job成员的查询句柄，避免按退出后可复用PID等待。"""
+        from ctypes import wintypes as wt
+        for capacity in (64,256,1024,4096):
+            class ProcessList(self.ctypes.Structure):
+                _fields_=[('assigned',wt.DWORD),('count',wt.DWORD),('ids',self.ctypes.c_size_t*capacity)]
+            data=ProcessList()
+            read=self.api.QueryInformationJobObject(self.handle,3,self.ctypes.byref(data),self.ctypes.sizeof(data),None)
+            if not read or data.count<data.assigned:
+                if self.ctypes.get_last_error()==234 or data.assigned>capacity:continue
+                raise OSError('无法取得本任务的进程句柄范围')
+            handles=[]
+            try:
+                for pid in list(data.ids)[:data.count]:
+                    handle=self.api.OpenProcess(0x100000,False,pid)
+                    if handle:handles.append(handle)
+                    elif self.ctypes.get_last_error()!=87:raise OSError('无法核对本任务进程是否已退出')
+                return handles
+            except OSError:
+                for handle in handles:self.api.CloseHandle(handle)
+                raise
+        raise OSError('本任务进程清单超过完整核验范围')
+
     def close(self):
+        handles=[];handles_verified=True
+        try:handles=self.process_handles()
+        except OSError:handles_verified=False
         ok = bool(self.api.TerminateJobObject(self.handle, 124))
         active = None
         try:
             deadline = time.monotonic() + 3
+            # TerminateJobObject是异步终止；活动计数归零时，已捕获的进程对象
+            # 在本机实测仍可能短暂未signaled，不能据计数立即报告退出。
+            for handle in handles:
+                timeout=max(0,int((deadline-time.monotonic())*1000))
+                if self.api.WaitForSingleObject(handle,timeout)!=0:handles_verified=False
+            for handle in handles:self.api.CloseHandle(handle)
+            handles=[]
             while ok:
                 state = self.accounting()
                 ok = bool(self.api.QueryInformationJobObject(self.handle, 1, self.ctypes.byref(state),
@@ -340,6 +374,8 @@ class WindowsJob:
                     break
                 time.sleep(0.05)
         finally:
+            for handle in handles:self.api.CloseHandle(handle)
             ok = bool(self.api.CloseHandle(self.handle)) and ok
             self.handle = None
-        return {'ok': ok and active == 0, 'backend': 'windows_kill_on_close_job', 'active_processes': active}
+        return {'ok': ok and active == 0 and handles_verified, 'backend': 'windows_kill_on_close_job',
+                'active_processes': active,'observed_process_handles_signaled':handles_verified}

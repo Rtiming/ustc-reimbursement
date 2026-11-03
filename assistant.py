@@ -91,6 +91,9 @@ def main():
     confirmation.add_argument('--workbook', type=batch_index_path, required=True)
     confirmation.add_argument('--manifest', type=batch_index_path, required=True)
     confirmation.add_argument('--output', type=batch_index_path, required=True)
+    review = sub.add_parser('material-review', help='反馈工作台：查找、启动、补件、复核与导出')
+    from material_review_cli import configure as configure_review
+    configure_review(review)
     s = sub.add_parser('setup', help='配置项目专用MCP环境及客户端片段，不改助手全局配置')
     s.add_argument('--check-only', action='store_true')
     s.add_argument('--with-materials', action='store_true', help='同时配置锁定的PDF和图片材料依赖，不下载OCR模型')
@@ -122,6 +125,8 @@ def main():
     w.add_argument('--tab-id')
     w.add_argument('--expected-userid')
     w.add_argument('--execute', action='store_true')
+    w.add_argument('--merge-pdf', action=argparse.BooleanOptionalAction, default=None, help='print阶段：是否将逐单PDF合并')
+    w.add_argument('--finance-only', action=argparse.BooleanOptionalAction, default=None, help='print阶段：是否仅打印财务信息，不含附件')
     w.add_argument('--allow-incomplete', action='store_true')
     w.add_argument('--delivery-plan', type=batch_index_path)
     w.add_argument('--output-root', type=batch_index_path)
@@ -162,6 +167,10 @@ def main():
             if args.scenario or args.batch_index or args.tab_id or args.expected_userid or args.submission_authorization:
                 ap.error('登记批次入口从本案配置读取身份与资料，不混入手写运行参数')
         elif not args.scenario or not args.batch_index:ap.error('给--case-id，或明确scenario与batch-index')
+        if (args.merge_pdf is not None or args.finance_only is not None) and (not args.case_id or args.phase != 'print'):
+            ap.error('两个打印开关仅用于workflow --case-id ... --phase print')
+        if args.phase == 'print' and not args.case_id:
+            ap.error('print须使用已登记case-id')
         if args.phase == 'status' and args.execute:
             ap.error('status不接受--execute')
         if bool(args.node) != bool(args.module_root):
@@ -203,13 +212,16 @@ def main():
             if args.python or args.phase or args.reason or args.channel!='stable' or not args.tab_id or not args.window_id or not args.output:
                 ap.error('relocate-frozen须给原工作页--tab-id、--window-id及新--output回执')
             if args.output.exists():ap.error('已有迁移回执，先读原回执和inventory，不重复迁移')
-            from mac_edge_bridge import status, relocate_finance_tab
+            from mac_edge_bridge import status, inventory, relocate_finance_tab, frozen_relocation_options
             from assistant_api import atomic_json
             current=status()
+            observed=inventory()
+            if observed['tab_id_namespace']!=current['tab_id_namespace']:ap.error('盘点期间连接身份变化，未迁移')
+            options=frozen_relocation_options(observed,args.tab_id,args.window_id)
             args.output.parent.mkdir(parents=True,exist_ok=True)
             with args.output.open('x',encoding='utf-8') as intent:
-                json.dump({'state':'relocation_requested','tab_id':args.tab_id,'old_window_id':args.window_id,'epoch':current['epoch'],'business_replayed':False},intent)
-            r=relocate_finance_tab(args.tab_id,tab_id_namespace=current['tab_id_namespace'],expected_window_id=args.window_id)
+                json.dump({'state':'relocation_requested','tab_id':args.tab_id,'old_window_id':args.window_id,'epoch':current['epoch'],'selection_binding':options,'business_replayed':False},intent)
+            r=relocate_finance_tab(args.tab_id,tab_id_namespace=current['tab_id_namespace'],expected_window_id=args.window_id,**options)
             atomic_json(args.output,r)
         elif args.action == 'new-window':
             if args.python or args.phase or args.tab_id or args.window_id or args.reason or args.channel!='stable':ap.error('new-window只新开固定后台财务窗口，不接页面地址或旧窗口')
@@ -260,6 +272,9 @@ def main():
                 else:
                     r = {'prepare':prepare,'install':install}[args.action](channel=args.channel,
                         python_executable=str(args.python) if args.python else None)
+    elif args.command == 'material-review':
+        from material_review_cli import run as run_review
+        r = run_review(args)
     elif args.command == 'confirmation-read':
         from confirmation_workbook import read_answers
         r = read_answers(args.workbook, args.manifest, args.output)
@@ -293,6 +308,7 @@ def main():
         if args.case_id:
             from registered_workflow import run_registered_workflow
             r=run_registered_workflow(AssistantService(material_roots=args.material_root),case_id=args.case_id,phase=args.phase,execute=args.execute,
+                print_options=({'merge_pdf':args.merge_pdf,'finance_only':args.finance_only,'output_root':str(args.output_root) if args.output_root else None,'sequences':args.sequences} if args.phase=='print' else None),
                 progress=lambda event:print(json.dumps(event,ensure_ascii=False),file=sys.stderr,flush=True))
         else:
             from reimbursement_workflow import run_workflow
@@ -328,16 +344,16 @@ def main():
         # The complete immutable run report is already on disk. Avoid emitting
         # every source and native receipt twice into the caller's context/log.
         keep = {'schema','ok','state','scenario','phase','batch_index','execute','as_of_utc',
-                'filled_count','audit_passed_count','material_gap_count','partially_filled_count',
+                'error','error_code','options','business_transport','case_id','filled_count','audit_passed_count','material_gap_count','partially_filled_count',
                 'held_count','counts_scope','issues','recoveries','report_path','delivery_counts',
-                'system_write_requested','approval_completed','payment_completed','pdf_exported','submitted_count','already_submitted_count','applicant_ready_count',
+                'system_write_requested','approval_completed','payment_completed','pdf_exported','submitted_count','already_submitted_count','already_approved_count','already_paid_count','applicant_ready_count',
                 'elapsed_seconds','run_elapsed_seconds','within_target','performance_verified','timing_complete','performance_target_seconds','reused_completed_run','live_rechecked'}
         compact = {key:value for key,value in r.items() if key in keep}
         if r.get('approval'):compact['approval']={key:value for key,value in r['approval'].items()if key in keep and key!='results'}
         delivery = r.get('delivery', {})
         if delivery:
             compact['delivery'] = {key:delivery[key] for key in
-                ['output_directory','progress_path','readable_summary','excel'] if key in delivery}
+                ['output_directory','progress_path','readable_summary','excel','merged_pdf','manifest','csv','exported_count','held_count'] if key in delivery}
         r = compact
     print(json.dumps(r, ensure_ascii=False, indent=2))
     return 0 if r.get('ok', r.get('ready', True)) else 2

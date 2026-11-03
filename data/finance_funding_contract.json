@@ -1,0 +1,9 @@
+{
+  "schema": "ustc-funding-http-contract-v1",
+  "definition_sha256": "5ac9597ed733d86d651aa2d7a31648061f642d5b74a8a3d09ee8e77d75a3cebd",
+  "winno": "170",
+  "select_button": "953199863E7A4ACC9E7EFDF627735E28",
+  "save_button": "8A33CD432F3E45439AC401A76E50E761",
+  "native_source": "school WF_YBX W170 including W171; checked 2026-10-28",
+  "write_route": "stage/funding"
+}

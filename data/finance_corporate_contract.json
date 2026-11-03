@@ -1,0 +1,17 @@
+{
+  "schema": "ustc-corporate-identity-http-v1",
+  "window": "56",
+  "definition_sha256": "6cbb9c81f38ab9448233f3e267358ed10196ada3d76bf6a3530d1806efe3181a",
+  "query_sha256": "5f350631a795332ec78d397cfa006fed8bf2c77def0470b8bad2933fc05dfcee",
+  "bank_query": {
+    "funcno": "80",
+    "tablenames": "(@{ybx_gs_getrows_branchinfo:;#82-t.province#;#82-t.city#;#82-t.bankname#;#82-t.branchcode#;#82-t.branchname#;#82-t.branchname1#}@) t",
+    "columns": [
+      "t.branchcode",
+      "t.branchname"
+    ],
+    "needcount": true
+  },
+  "taxpayer_proc": "$c7ec1501d96a56ef126b1d23a4e20661",
+  "taxpayer_event": "$c7ec1501d96a56ef126b1d23a4e20661|#24-t.banksname#,#61-serialno#,#0-userinfo.userid#"
+}

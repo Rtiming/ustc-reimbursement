@@ -32,10 +32,11 @@ def expected_errors(fn):
     return wrapped
 
 
-def create_server(service):
+def create_server(service, toolset='full'):
     from workspace_config import distribution_version
     server = MCPServer('ustc-reimbursement', version=distribution_version(PROJECT), instructions=(
         '先reimbursement_capabilities选择任务入口，照next_action和needed_inputs继续。办理财务先cases、overview明确case_id。'
+        '使用compact工具集时，其他业务名称通过reimbursement_assist的discover/schema/call/prepare调用，不调用未暴露的工具；status接续原任务。'
         '耗时动作返回job_id，用result查询；同一操作重连保持request_id，不换号重发。'
         'execute默认false；明确本案授权后才执行已支持写入。写入完成要独立readback和record_result。'
         'completed仅表示程序成功退出，不代表已保存或审批通过。本人同意/验证码由用户完成。'
@@ -46,11 +47,48 @@ def create_server(service):
     invoice_read = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True)
     ocr_work = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True)
 
+    @server.tool(annotations=live, structured_output=True)
+    @expected_errors
+    def reimbursement_assist(action: Literal['discover','schema','call','prepare','confirm','status'] = 'discover',
+                             group: str | None = None, operation: str | None = None, inputs: dict | None = None,
+                             case_id: str | None = None, intent_id: str | None = None, job_id: str | None = None,
+                             confirmation: str | None = None) -> dict[str, Any]:
+        """简明入口。discover选操作、schema取字段、call只读或预览；改动prepare返回冻结计划，获用户明确授权后confirm原intent_id。status接续原任务。无需GUI，不猜参数或重试未知写入。"""
+        return service.assist(action, group, operation, inputs, case_id, intent_id, job_id, confirmation)
+
     @server.tool(annotations=read, structured_output=True)
     @expected_errors
     def reimbursement_capabilities(intent: CapabilityIntent = 'materials') -> dict[str, Any]:
         """不知道从哪里开始先调用。材料/规范/OCR发现仅返回离线工具，不探测用户浏览器资料；财务/导出才检查正式桥接线。均不启动浏览器或改写单据。"""
-        return service.capabilities(intent)
+        result=service.capabilities(intent)
+        if toolset=='compact':
+            from agent_assist import compact_routes
+            return compact_routes(result)
+        return result
+
+    @server.tool(annotations=local, structured_output=True)
+    @expected_errors
+    def reimbursement_material_review(action: Literal['list','register','summary','start','open','status','doctor','stop'] = 'list', workspace: str | None = None, port: int = 8766) -> dict[str, Any]:
+        """本机反馈台统一入口。list查已登记工作台；workspace须位于material-root内。register只登记入口，summary读取回复/缺项/原单去向，open启动或复用本地页面。不会建财务单、保存或提交。构建、补件、复核与导出合同见guide review。"""
+        return service.material_review(action, workspace, port)
+
+    @server.tool(annotations=local, structured_output=True)
+    @expected_errors
+    def reimbursement_case_materials(case_id: str, action: Literal['inspect','save_document','save_expenses','remove_expense','save_issue','plan','review_open','save_dispositions','materialize','delivery_plan','delivery_build']='inspect', values: dict | list | None=None, expected_revision: str | None=None, confirmation_note: str | None=None, execute: bool=False, offset: int=0, limit: int=50) -> dict[str,Any]:
+        """从本活动已导入原件登记明白纸、费用和付款/行程关联，打开补件工作台或按已选规则分单。无需技术路径；inspect返回材料身份、当前修订及下一步。保存为本地记录，不办理财务。"""
+        return service.case_materials(case_id,action,values,expected_revision,confirmation_note,execute,offset,limit)
+
+    @server.tool(annotations=local, structured_output=True)
+    @expected_errors
+    def reimbursement_case_delivery(case_id: str, action: Literal['inspect','plan','export','status','resume']='inspect',business_date: str | None=None,sequence: int | None=None,kind: Literal['details','formal']='details',include_invoice_attachments: bool | None=None,plan_id: str | None=None,confirmation_note: str | None=None,execute: bool=False) -> dict[str,Any]:
+        """本案交付：inspect查看原计划；plan只填写已核业务日期、序号、明细/正式打印及附件选项，账号单号和来源自动绑定。核对后export使用固定HTTP导出，status独立检查PDF字节，resume只接续原导出，不重造文件或覆盖已有PDF。不要求手抄计划文件或job。"""
+        return service.case_delivery(case_id,action,business_date,sequence,kind,include_invoice_attachments,plan_id,confirmation_note,execute)
+
+    @server.tool(annotations=local, structured_output=True)
+    @expected_errors
+    def reimbursement_standards_import(bundle: dict,execute: bool=False,expected_snapshot: str | None=None) -> dict[str,Any]:
+        """预览或导入用户选定的私人规范包ustc-private-standards-bundle-v1。自动使用安装时私人库，仅新增专项或替换空模板，已有非空专项不同则拒绝。预览显示规则范围及库快照；执行必须原expected_snapshot，保留原包/旧版/回读及事务。材料规则存在私人库，不修改发行源码或财务记录。"""
+        return service.standards_import(bundle,execute,expected_snapshot)
 
     @server.tool(annotations=local, structured_output=True)
     @expected_errors
@@ -75,7 +113,7 @@ def create_server(service):
 
     @server.tool(annotations=read, structured_output=True)
     @expected_errors
-    def reimbursement_standards_read(library_root: str, profile_id: str | None = None) -> dict[str, Any]:
+    def reimbursement_standards_read(library_root: str | None = None, profile_id: str | None = None) -> dict[str, Any]:
         """读取material-root内规范库；不填profile_id先列专项，选定后返回规范及SHA。不能用人名自动套旧案。"""
         return service.standards_read(library_root, profile_id)
 
@@ -151,15 +189,48 @@ def create_server(service):
 
     @server.tool(annotations=local, structured_output=True)
     @expected_errors
-    def reimbursement_pdf_export(case_id: str, export_plan: dict, export_root: str, tab_id: str, expected_userid: str, request_id: str, silent: bool = True, execute: bool = False) -> dict[str, Any]:
-        """导出已打开的同案PDF预览，默认仅计划、默认静默。确认计划含日期/序号/摘要，执行绑定账号/tab/单号并分块核验，拒绝覆盖。返回job_id后查result；预览不是正式打印件。"""
-        return service.pdf_export(case_id, export_plan, export_root, tab_id, expected_userid, request_id, silent, execute)
+    def reimbursement_pdf_export(case_id: str, export_plan: dict, export_root: str, tab_id: str, expected_userid: str, request_id: str, silent: bool = True, execute: bool = False, resume_job_id: str | None = None, source_job_id: str | None = None) -> dict[str, Any]:
+        """固定HTTP导出同案PDF：details为学校打印历史明细预览，formal_print_api为正式打印。默认仅计划、静默；日期/序号/摘要及账号/单号/金额绑定，逐块和整件SHA核验原始字节，拒绝覆盖。resume_job_id只恢复已确认生成的原文件，未知生成不重发；source_job_id可引用完整本人清单归档历史单，逐项核原日期/摘要/金额及归档序号，不绑定本案单号。预览不算正式打印或批准。"""
+        return service.pdf_export(case_id, export_plan, export_root, tab_id, expected_userid, request_id, silent, execute, resume_job_id, source_job_id)
+
+    @server.tool(annotations=ocr_work, structured_output=True)
+    @expected_errors
+    def reimbursement_print_batch(case_id: str, request_id: str, merge_pdf: bool | None = None,
+                                  finance_only: bool | None = None, output_root: str | None = None,
+                                  sequences: list[int] | None = None, execute: bool = False) -> dict[str, Any]:
+        """批量导出审批后的正式报销单。merge_pdf与finance_only独立；缺省读取本批配置，最终默认false/true。默认预览，执行返回job_id后查result；中断保留原任务。"""
+        return service.print_batch(case_id, request_id, merge_pdf, finance_only, output_root, sequences, execute)
+
+    @server.tool(annotations=read, structured_output=True)
+    @expected_errors
+    def reimbursement_business(case_id: str, action: str, tab_id: str, expected_userid: str,
+                               request_id: str, domain: str | None = None, source_job_id: str | None = None,
+                               print_job_id: str | None = None, reference_serial: str | None = None, staff_query: str | None = None, notes_xtype: str | None = None) -> dict[str, Any]:
+        """固定HTTP：bills-list完整本人单据；approvals-list完整当前审批人清单（角色来自原生记录，不能推定权限）；bill-read读取基本/经费/支出/支付/审批/劳务/说明/预审/已归属票据；invoices-list读取日常票池，recognition-list读取识别明细，invoice-inventory完整读取两者用于上传后回读；upload-prepare核第一批真实原件但不上传；create-prepare核学校建单定义、模板及默认值，不创建；definitions核原生定义；basic/payments/notes/pre-review-prepare核本案原字段和变更计划，不保存；bills-export引用完整清单source_job_id导出原生EXCEL/PDF并逐单逐列核验，bills-export-recover引用原导出job只收取已生成文件；print-coverage核待投递覆盖；reference-bill-read凭同案完整本人清单source_job_id及reference_serial只读查历史单，不绑定本案或提供保存来源；domain=archive-summary保留七个完整摘要域，票据与分配另读；staff-lookup按staff_query教工号查询当前教师，不绑定单号、不保存。无点击、不审批。"""
+        return service.business(case_id, action, tab_id, expected_userid, request_id, domain, source_job_id, print_job_id, reference_serial, staff_query, notes_xtype)
 
     @server.tool(annotations=read, structured_output=True)
     @expected_errors
     def reimbursement_pdf_export_inspect(case_id: str, job_id: str) -> dict[str, Any]:
         """PDF导出失败/中断后只读原任务意图、分块回执与文件SHA；不启动浏览器、不换任务重导、不清原marker。"""
         return service.pdf_export_inspect(case_id, job_id)
+
+    @server.tool(annotations=local, structured_output=True)
+    @expected_errors
+    def reimbursement_finance_feedback(case_id: str, source_job_id: str,
+            serials: list[str] | None = None, include_history: bool = False,
+            output_dir: str | None = None, execute: bool = False) -> dict[str, Any]:
+        """从同案完整bills-list回执获取财务挂单/审批退回原文；保留单号、状态、采集时间和来源SHA。历史意见默认分离，缺理由明确列出。读取不启动浏览器；execute仅在明确output_dir时生成全新HTML复制页、文本和Excel交付计划，不修改财务。"""
+        return service.finance_feedback(case_id, source_job_id, serials, include_history, output_dir, execute)
+
+    @server.tool(annotations=local, structured_output=True)
+    @expected_errors
+    def reimbursement_intake_review(case_id: str, intake_job_id: str | None = None, action: Literal['batches','inspect','preview','register'] = 'inspect',
+            records: list[dict] | None = None, expected_revision: str | None = None,
+            confirmation_note: str | None = None, execute: bool = False, offset: int = 0, limit: int = 50,
+            material_id: str | None = None, page: int = 1) -> dict[str, Any]:
+        """查看成功归档的材料并登记人工核对。inspect分页返回材料ID/来源SHA/页数/票号候选；register须逐项类别、完整票号页码、核对依据和刚读取的revision。默认预览；execute只经update_case登记本案候选来源，不选票、不更改核定金额、不写财务。普通电子发票20位；其他票据保留专用流程。"""
+        return service.intake_review(case_id, intake_job_id, action, records, expected_revision, confirmation_note, execute, offset, limit, material_id, page)
 
     @server.tool(annotations=read, structured_output=True)
     @expected_errors
@@ -193,9 +264,9 @@ def create_server(service):
 
     @server.tool(annotations=local, structured_output=True)
     @expected_errors
-    def reimbursement_new_case(case_id: str, profile: CaseProfile = 'student_activity') -> dict[str, Any]:
+    def reimbursement_new_case(case_id: str, profile: CaseProfile = 'student_activity', title: str | None = None) -> dict[str, Any]:
         """建立空案件和五份参数文件。不会复用旧事实、授权或建财务单；已有case_id拒绝覆盖。"""
-        return service.new_case(case_id, profile)
+        return service.new_case(case_id, profile, title)
 
     @server.tool(annotations=local, structured_output=True)
     @expected_errors
@@ -259,9 +330,9 @@ def create_server(service):
 
     @server.tool(annotations=live, structured_output=True)
     @expected_errors
-    def reimbursement_access(case_id: str, request_id: str, execute: bool = False, tab_id: str | None = None, action: Literal['check', 'check-page', 'diagnose', 'ensure', 'new-interface', 'recover-interface','wake-interface'] | None = None, job_id: str | None = None, artifact_id: str | None = None, expected_userid: str | None = None, silent: bool | None = None, session_only: bool | None = None) -> dict[str, Any]:
-        """财务检查与登录。new-interface须execute=true，可省略旧tab_id；silent默认true，不支持时不回退。明确silent=false允许原生短暂置前并恢复原标签。recover-interface只读同案原job/artifact，继承原开页模式，不重开。check-page需身份，diagnose只读错误页；不输出密码/Cookie。"""
-        params = {k: v for k, v in dict(tab_id=tab_id, action=action, job_id=job_id, artifact_id=artifact_id, expected_userid=expected_userid, silent=silent, session_only=session_only).items() if v is not None}
+    def reimbursement_access(case_id: str, request_id: str, execute: bool = False, tab_id: str | None = None, action: Literal['check', 'check-page', 'check-backend', 'diagnose', 'ensure', 'new-interface', 'recover-interface', 'wake-interface', 'restore-context', 'applicant-verification-open', 'remuneration-activity-setup', 'remuneration-add-person', 'remuneration-basic-open', 'remuneration-clear-length-rejection', 'remuneration-close-person', 'remuneration-confirm-added', 'remuneration-confirm-create', 'remuneration-create-claim', 'remuneration-entry', 'remuneration-expenses-open', 'remuneration-funding-open', 'remuneration-funding-other-add', 'remuneration-funding-other-open', 'remuneration-funding-other-select', 'remuneration-funding-search', 'remuneration-inspect', 'remuneration-save', 'remuneration-readback', 'remuneration-recover', 'remuneration-lookup-person', 'remuneration-open-person', 'remuneration-payment-close', 'remuneration-payment-inspect', 'remuneration-payments-open', 'remuneration-student-category', 'remuneration-teacher-lookup'] | None = None, job_id: str | None = None, artifact_id: str | None = None, expected_userid: str | None = None, silent: bool | None = None, separate_window: bool | None = None, student_id: str | None = None, query: str | None = None, plan: dict | None = None, authority: dict | None = None, session_only: bool | None = None) -> dict[str, Any]:
+        """财务检查、登录和本案薪酬办理。full_control按授权定位财务页；new-interface可separate_window，restore-context恢复本案上下文。薪酬经SHA原件、人员查询、添加和独立清单回读后建单；添加及建单须来源job_id/artifact_id，确认只承接原pending，不重放。查guide(remuneration/execution)，仍不代其他角色审批或输入验证码。"""
+        params = {k: v for k, v in dict(tab_id=tab_id, action=action, job_id=job_id, artifact_id=artifact_id, expected_userid=expected_userid, silent=silent, separate_window=separate_window, student_id=student_id, query=query, plan=plan, authority=authority, session_only=session_only).items() if v is not None}
         return service.enqueue(case_id, 'access', params, request_id, execute)
 
     @server.tool(annotations=invoice_read, structured_output=True)
@@ -292,7 +363,7 @@ def create_server(service):
     @server.tool(annotations=live, structured_output=True)
     @expected_errors
     def reimbursement_invoice_retry(case_id: str, action: Literal['inspect', 'preview', 'refresh', 'reidentify', 'cleanup', 'confirm', 'readback', 'recover'], tab_id: str, request_id: str, execute: bool = False, expected_userid: str | None = None, grid: Literal['53', '113'] | None = None, target_guids: list[str] | None = None, target_filecodes: list[str] | None = None, planned_action: Literal['refresh', 'reidentify', 'cleanup'] | None = None, targets: list[dict[str, str]] | None = None, source_job_id: str | None = None, source_artifact_id: str | None = None, pool_job_id: str | None = None, pool_artifact_id: str | None = None, recognition_job_id: str | None = None, recognition_artifact_id: str | None = None, inspection_job_id: str | None = None, inspection_artifact_id: str | None = None, plan_job_id: str | None = None, plan_artifact_id: str | None = None, receipt_job_id: str | None = None, receipt_artifact_id: str | None = None, job_id: str | None = None, artifact_id: str | None = None) -> dict[str, Any]:
-        """异常票据先inspect及完整53/113查询，再preview冻结原件/原生目标/清理范围；来源引用同案source任务，或已登记且SHA核对的verification_manifest，无需已选票或建单。刷新、重识别、清理、确认须execute=true并引用同案预览SHA；refresh只触发原生查询，回执system_write=false。重识别及清理均分两步：confirm还需对应原动作回执和独立真实弹框检查。readback必须引用同计划成功动作receipt（cleanup/reidentify须confirm），53/113新查询均晚于动作回执和计划基线。recover只查原动作marker，不重放；原job为unknown/failed且无回执时可省artifact_id。全部走稳定job与日志，不接路径/JS/URL/前台参数，不释放他人预约或自动重传。"""
+        """异常票据固定HTTP：inspect完整读取本人53/113及动作定义；preview按同案原件SHA/票号/原生ID冻结范围。cleanup仅登记清理意图，不删除；新发inspect后confirm才一次删除明确异常记录。正常/已绑定/无错误记录受保护。readback引用原confirm或其原marker恢复及两个新完整查询，ack-write核目标消失和非目标ID保留后清pending；明确服务端拒绝须完整回读未变化才可not_applied。recover只读原marker，不重发。refresh为HTTP查询，system_write=false；单票重识别先核原生检查和源文件确认，再调用固定OCR接口一次，独立回读正常认证或needs_correction；处理中不解pending，不退回旧控件。不释放他人预约，不自动重传。"""
         return service.invoice_retry(case_id, action, tab_id, request_id, execute,
             expected_userid, grid, target_guids, target_filecodes, planned_action, targets, source_job_id, source_artifact_id,
             pool_job_id, pool_artifact_id, recognition_job_id, recognition_artifact_id, inspection_job_id, inspection_artifact_id,
@@ -301,7 +372,7 @@ def create_server(service):
     @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True), structured_output=True)
     @expected_errors
     def reimbursement_invoice_selection(case_id: str, action: Literal['preview', 'apply', 'readback', 'recover'], tab_id: str, request_id: str, execute: bool = False, source_job_id: str | None = None, source_artifact_id: str | None = None, audit_refs: list[dict[str, str]] | None = None, selectors: list[dict[str, str]] | None = None, mode: Literal['append', 'replace', 'remove'] | None = None, grid: Literal['53', '1669'] | None = None, serial: str | None = None, expected_userid: str | None = None, expected_before_guids: list[str] | None = None, snapshot_job_id: str | None = None, snapshot_artifact_id: str | None = None, preview_job_id: str | None = None, preview_artifact_id: str | None = None, job_id: str | None = None, artifact_id: str | None = None) -> dict[str, Any]:
-        """独立选票，默认preview；同案来源/审核/快照/preview以job/artifact SHA引用。apply须具体授权及execute=true，只改原生勾选、不建单/提交/删除。缺selarrrow/身份/上下文、占用或购方审核失败不能新增；recover仅原marker不重发。"""
+        """完整HTTP票池+同案原件/票面审核冻结GUID选择。preview默认只读；apply须execute，仅原子保存本案manifest中的选择集，system_write=false，不改变页面勾选、不建单或提交。追加/替换/移除保留来源与审核SHA，抬头税号及已占用检查继续生效；已有单号不适用本入口。readback比较本地GUID集及新HTTP完整票池。recover按原job本地意图和前后SHA恢复，不覆盖其他编辑；旧控件预览不能派发。"""
         return service.invoice_selection(case_id, action, tab_id, request_id, execute,
             source_job_id, source_artifact_id, audit_refs, selectors, mode, grid, serial,
             expected_userid, expected_before_guids, snapshot_job_id, snapshot_artifact_id,
@@ -309,27 +380,43 @@ def create_server(service):
 
     @server.tool(annotations=live, structured_output=True)
     @expected_errors
-    def reimbursement_stage(case_id: str, stage: Literal['basic', 'funding', 'expenses', 'payments', 'notes', 'pre-review', 'no-contract', 'audit', 'review'], request_id: str, execute: bool = False, tab_id: str | None = None) -> dict[str, Any]:
-        """日常草稿的单阶段计划/执行，默认仅生成计划。execute=true需当前tab_id和本案授权。保存后独立回读；review止于本人审核。"""
-        return service.enqueue(case_id, 'stage', {'stage': stage, 'tab_id': tab_id}, request_id, execute)
+    def reimbursement_stage(case_id: str, stage: Literal['basic', 'funding', 'categories', 'expenses', 'payments', 'notes', 'pre-review', 'no-contract', 'audit', 'review'], request_id: str, execute: bool = False, tab_id: str | None = None,noop_only: bool = False) -> dict[str, Any]:
+        """草稿单阶段计划/执行；basic/funding/expenses/payments/notes/pre-review走固定HTTP，各阶段范围见business指南。execute=true需当前tab_id和本案账号参数；单次保存后business bill-read独立回读，再record_result，不重放未知写入。真实变更保存尚待验收。"""
+        return service.enqueue(case_id, 'stage', {'stage': stage, 'tab_id': tab_id,'noop_only':noop_only}, request_id, execute)
 
     @server.tool(annotations=live, structured_output=True)
     @expected_errors
-    def reimbursement_invoice(case_id: str, action: Literal['open-pool', 'open-upload', 'upload', 'read', 'save-upload', 'create-draft','resume-draft'], request_id: str, execute: bool = False, tab_id: str | None = None, start: int = 0, count: int = 10) -> dict[str, Any]:
-        """发票目录、上传、认证和建日常草稿。默认生成脚本；每批1至10票。未知创建不重放；resume-draft只接续本案最后一次独立回读并ack的明确拒绝，保留原意图。上传和认证后独立回读再登记。"""
-        return service.enqueue(case_id, 'invoice', {'action': action, 'start': start, 'count': count, 'tab_id': tab_id}, request_id, execute)
+    def reimbursement_invoice(case_id: str, action: Literal['open-pool', 'open-upload', 'upload', 'upload-resume','upload-release', 'upload-recognize','upload-recognize-resume','upload-recover-recognition','nonvat-inspect','nonvat-save','nonvat-readback','nonvat-recover','nonvat-select','allowance-inspect','allowance-prepare','allowance-create','allowance-readback','allowance-recover','draft-cancel-prepare','draft-cancel','draft-cancel-recover','domestic-allowance-inspect','domestic-travel-add-prepare','domestic-travel-add-save','domestic-travel-add-recover','domestic-allowance-edit-prepare','domestic-allowance-edit-save','domestic-allowance-edit-recover','domestic-allowance-finalize', 'read', 'save-upload', 'create-draft','resume-draft'], request_id: str, execute: bool = False, tab_id: str | None = None, start: int = 0, count: int = 10, job_id: str | None = None) -> dict[str, Any]:
+        """upload按来源SHA分块HTTP上传并一次保存，每批1至10份、每份≤5MiB。upload-resume只接原job及未发出的子阶段。upload-recognize引用原upload job，接续已保存PDF/OFD的原生识别，保留原pending；upload-recognize-resume引用原识别job，只发尚未准备的目标，未知请求不重发。随后business invoice-inventory完整独立回读及ack-write。create-draft核本案冻结选择、原件审核和学校分支后单次创建；完整GUID/金额回读后bind-serial。resume-draft只读原marker，不重建。未迁移写动作禁止点击回退。"""
+        p={'action':action,'tab_id':tab_id}
+        original_actions={'upload-resume','resume-draft','upload-recognize','upload-recognize-resume','upload-recover-recognition','nonvat-readback','nonvat-recover','allowance-prepare','allowance-create','allowance-readback','allowance-recover','draft-cancel','draft-cancel-recover','domestic-travel-add-save','domestic-travel-add-recover','domestic-allowance-edit-save','domestic-allowance-edit-recover'}
+        if action in original_actions:p['job_id']=job_id
+        elif action in {'upload','nonvat-save','domestic-travel-add-prepare','domestic-allowance-edit-prepare'}:
+            p['start']=start
+            if action=='upload':p['count']=count
+        if action not in original_actions and job_id is not None:raise ValueError('job_id只用于固定业务原准备、保存回读或恢复任务')
+        return service.enqueue(case_id, 'invoice', p, request_id, execute)
 
     @server.tool(annotations=live, structured_output=True)
     @expected_errors
-    def reimbursement_correction(case_id: str, action: Literal['check', 'verify', 'apply', 'begin', 'open', 'select', 'update', 'save', 'return', 'remark', 'basic', 'basic-read', 'basic-close', 'drafts', 'resume'], plan: dict, request_id: str, execute: bool = False, tab_id: str | None = None, group: str = '', key: str = '', kind: str = '', job_id: str | None = None, artifact_id: str | None = None) -> dict[str, Any]:
-        """退回单逐票拆分。plan含原件SHA、GUID、人员、往返用途、经费和个人/团队限额；默认校验/生成计划。update/save后须独立回读、verify和ack-write。不重新生成审批流程。"""
+    def reimbursement_correction(case_id: str, action: Literal['check', 'inspect', 'recover', 'verify', 'apply', 'begin', 'open', 'select', 'update', 'save', 'return', 'remark', 'basic', 'basic-read', 'basic-close', 'drafts', 'resume', 'returned-prepare', 'returned-open', 'returned-confirm', 'returned-recover'], plan: dict, request_id: str, execute: bool = False, tab_id: str | None = None, group: str = '', key: str = '', kind: str = '', job_id: str | None = None, artifact_id: str | None = None) -> dict[str, Any]:
+        """退回原单续编及逐票拆分。returned-*用空plan：prepare核本人拒绝原单；open引用prepare；学校明确确认后confirm引用原open；recover只读原marker。同号草稿独立回读后才更新本地流程标记，不新建、不审批。专项拆分plan含原件SHA、GUID、人员、往返用途、经费与限额，仍须独立verify/ack-write。"""
+        if action.startswith('returned-'):
+            if plan or group or key or kind or artifact_id:raise ValueError('退回原单接续仅空plan、当前tab及原job_id')
+            return service.enqueue(case_id,'correction',{'action':action,'tab_id':tab_id,**({'job_id':job_id}if job_id else{})},request_id,execute)
         return service.enqueue(case_id, 'correction', {'action': action, 'plan': plan, 'tab_id': tab_id, 'group': group, 'key': key, 'kind': kind, 'job_id': job_id, 'artifact_id': artifact_id}, request_id, execute)
 
     @server.tool(annotations=live, structured_output=True)
     @expected_errors
-    def reimbursement_submission(case_id: str, action: SubmissionAction, plan: dict, request_id: str, execute: bool = False, tab_id: str | None = None) -> dict[str, Any]:
-        """按本案明确授权逐步提交同号单据；每步独立回读。applicant-agree另须applicant_agreement_authorized、意见同意及当前账号，限申请人508节点；验证码留现场，不代领导审批或付款。"""
-        return service.enqueue(case_id, 'submission', {'action': action, 'plan': plan, 'tab_id': tab_id}, request_id, execute)
+    def reimbursement_applicant_batch(case_id: str, manifest: dict, tab_id: str, request_id: str, execute: bool = False) -> dict[str, Any]:
+        """既有单据的本人508节点批量同意。manifest须路径及SHA，逐单绑定输入和用户授权；保留短信停点、原pending、已完成跳过、独立回读和耗时。原request重连续办，不建单、不代其他角色审批或填验证码。"""
+        return service.applicant_batch(case_id,manifest,tab_id,request_id,execute)
+
+    @server.tool(annotations=live, structured_output=True)
+    @expected_errors
+    def reimbursement_submission(case_id: str, action: SubmissionAction, plan: dict, request_id: str, execute: bool = False, tab_id: str | None = None,job_id: str | None = None,artifact_id: str | None = None) -> dict[str, Any]:
+        """inspect/options已接固定HTTP：完整合同/打印及其他辅助证据分组，保存后新的inspect再ack-write；无点击回退。其他流程写节点仍按迁移表核对。按本案明确授权逐步办理同号单据；applicant-agree另须applicant_agreement_authorized、意见同意及当前账号，限申请人508节点；验证码留现场，不代领导审批或付款。"""
+        return service.enqueue(case_id, 'submission', {'action': action, 'plan': plan, 'tab_id': tab_id,'job_id':job_id,'artifact_id':artifact_id}, request_id, execute)
 
     @server.tool(annotations=read, structured_output=True)
     @expected_errors
@@ -364,11 +451,90 @@ def create_server(service):
         """读取后台任务状态和回执目录；按artifact_id取JSON完整回执（长号码脱敏）或文档路径。queued/running等待；failed/unknown先核对，不重放。"""
         return service.result(case_id, job_id, artifact_id)
 
+    @server.tool(annotations=read, structured_output=True)
+    @expected_errors
+    def reimbursement_task_view(case_id: str, job_id: str, wait_seconds: float = 0) -> dict[str, Any]:
+        """优先用此入口读取任务结论和可直接调用的下一步；最多等待原job 10秒，不重发。保留来源引用、完整性与未核状态，默认不回传大段原始JSON；完整依据按details_call读取。程序完成不冒称财务完成。"""
+        result=service.task_view(case_id,job_id,wait_seconds)
+        if toolset=='compact':
+            from agent_assist import compact
+            return compact(result,case_id=case_id)
+        return result
+
+    @server.tool(annotations=local, structured_output=True)
+    @expected_errors
+    def reimbursement_case_details(case_id: str, action: Literal['inspect','draft','save'] = 'inspect',
+            values: dict | None = None, expected_revision: str | None = None,
+            confirmation_note: str | None = None, execute: bool = False) -> dict[str, Any]:
+        """日常报销中文表单。inspect返回字段合同、已有值、全部显式缺项和revision；draft只暂存未确认填写；save须确认依据及原revision，复用update_case保存本地参数。不会填学校网页、创建单据或改变审批状态。个人收款仅姓名/学工号，银行卡由学校候选核实。"""
+        return service.case_details(case_id,action,values,expected_revision,confirmation_note,execute)
+
+    @server.tool(annotations=read, structured_output=True)
+    @expected_errors
+    def reimbursement_case_journey(case_id: str, action: Literal['inspect','invoice'] = 'inspect', index: int | None = None) -> dict[str, Any]:
+        """按实际来源、票面核对、填写和原任务状态给出可执行下一步。inspect不会要求在建单前虚填单号；invoice返回本案SHA核实的原件核对信息。未知写入先回原任务。"""
+        return service.case_journey(case_id,action,index)
+
+    @server.tool(annotations=local, structured_output=True)
+    @expected_errors
+    def reimbursement_finance_connection(action: Literal['status','install_bridge','discover','verify','accept','bills','approvals','history'] = 'status',
+            expected_userid: str | None = None, tab_id: str | None = None, connection_id: str | None = None,
+            source_job_id: str | None = None, request_id: str | None = None, execute: bool = False) -> dict[str, Any]:
+        """连接本人本机Edge账号，不接收密码或验证码。status/discover查连接；verify明确学工号、选中tab和request_id进行只读核验；原任务结束后accept原source_job_id得到connection_id；bills/approvals/history以新查询request_id分别读单据、待审批或历史清单。只有install_bridge需execute=true，登记当前Windows用户组件；不会写财务。无需先创建活动。"""
+        return service.finance_connection(action,expected_userid,tab_id,connection_id,source_job_id,request_id,execute)
+
+    @server.tool(annotations=local, structured_output=True)
+    @expected_errors
+    def reimbursement_material_requirements(case_id: str, action: Literal['inspect','context','acknowledge'] = 'inspect',
+            values: dict | None = None, expected_revision: str | None = None, note: str | None = None, execute: bool = False) -> dict[str, Any]:
+        """逐项显示当前材料规则、缺件和条件。context只登记有依据的已知布尔条件；acknowledge记录已查看差项以继续其他准备，所有缺件原样保留，绝不标记材料齐全。仅修改本地资料，须当前revision。"""
+        return service.material_requirements(case_id,action,values,expected_revision,note,execute)
+
+    @server.tool(annotations=local, structured_output=True)
+    @expected_errors
+    def reimbursement_intake_groups(case_id: str, intake_job_id: str, groups: list[dict] | None = None,
+            expected_revision: str | None = None, execute: bool = False) -> dict[str, Any]:
+        """多活动收件分组。先读取本案已成功归档的材料和目录候选；groups显式给title/profile/material_ids预览，核对范围后execute。每份材料只能归一个子活动；未分配保留原批次。沿冻结分组计划重连不重复建活动，不推定金额、票面通过或财务授权。"""
+        return service.intake_groups(case_id,intake_job_id,groups,expected_revision,execute)
+
+    @server.tool(annotations=local, structured_output=True)
+    @expected_errors
+    def reimbursement_receive_materials(case_id: str, paths: list[str], request_id: str,
+            grouping: Literal['unassigned','directories'] = 'unassigned', execute: bool = False,
+            source_sha256: str | None = None) -> dict[str, Any]:
+        """从明确选定的本机原文件/材料文件夹收件，包括桌面路径。预览冻结逐文件SHA，沿next_action确认后将校验副本送入资料区，再用原material_intake归档。原文件保留，不扩大其他工具权限。文件或目录内容改变须重新预览。目录仅为分组候选，金额另核。"""
+        return service.receive_materials(case_id,paths,request_id,grouping,execute,source_sha256)
+
+    @server.tool(annotations=live, structured_output=True)
+    @expected_errors
+    def reimbursement_case_finance(case_id: str, action: Literal['inspect','bind','source_audit','pool','selection_preview','selection_apply','upload','create','bind_created','fill_plan','fill_continue','fill_pause','fill_status','fill_recover','ready_inspect','ready_plan','ready_continue','ready_status','ready_pause','ready_recover']='inspect',
+            connection_id: str | None=None, job_id: str | None=None, invoice_numbers: list[str] | None=None,
+            start: int=0, count: int=1, plan_id: str | None=None, authorization_note: str | None=None,
+            request_id: str | None=None, execute: bool=False) -> dict[str,Any]:
+        """本案财务向导。先inspect和bind已核本人连接；账号、tab和正式来源自动带入。原票audit、票池、选票预览/保存、建单/绑定仍是分开的步骤；fill_plan冻结完整填单范围，授权后fill_continue逐步接续原任务并独立回读，fill_pause暂停后续阶段。只用原job和next_action，不猜单号/重复建单，不模拟界面。"""
+        return service.case_finance(case_id,action,connection_id,job_id,invoice_numbers,start,count,plan_id,authorization_note,request_id,execute)
+
+    @server.tool(annotations=live, structured_output=True)
+    @expected_errors
+    def reimbursement_approver_batch(action: Literal['list','inspect','plan','status','run','resume','recover','reconcile','verification','pause','finalize'] = 'list',
+            connection_id: str | None = None, source_job_id: str | None = None, selected_ids: list[str] | None = None,
+            decision: Literal['agree','reject'] = 'agree', opinion: str | None = None, plan_id: str | None = None,
+            authorization_note: str | None = None, request_id: str | None = None, execute: bool = False) -> dict[str, Any]:
+        """按当前登录人的真实审批角色办理。list/status接续原批；inspect从本人收件箱完整待办列可选项；plan冻结所选项、角色、金额及逐字意见。run须明确本批授权和execute；verification只展示同项本人验证页，不读取验证码；resume沿原范围继续；pause只暂停后续项目；finalize只补已回读项目的文档；recover/reconcile只读原结果，不重发未知审批。每项独立核对日志及金额，步骤完成不等于整单审批或付款完成。"""
+        return service.approver_batch(action,connection_id,source_job_id,selected_ids,decision,opinion,plan_id,authorization_note,request_id,execute)
+
     @server.resource('reimbursement://guide/{topic}')
     def read_guide(topic: str) -> str:
         """项目权威使用文档；topic见guide工具枚举。"""
         try: return service.guide(topic)['text']
         except ValueError as e: raise ResourceError(str(e)) from e
+    if toolset == 'compact':
+        from assistant_contract import json_routes
+        for name in json_routes():
+            if name not in {'reimbursement_assist','reimbursement_capabilities','reimbursement_task_view'}:
+                server.remove_tool(name)
+    elif toolset != 'full':
+        raise ValueError('toolset须为full或compact')
     return server
 
 
@@ -379,8 +545,9 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--workspace', type=str, default=str(PROJECT))
     ap.add_argument('--material-root', action='append', help='可多次指定，缺省项目所在活动目录；只声明材料路径，不包含登录资料')
+    ap.add_argument('--toolset', choices=['full','compact'], default='full')
     args = ap.parse_args()
-    create_server(AssistantService(args.workspace, args.material_root)).run(transport='stdio')
+    create_server(AssistantService(args.workspace, args.material_root), args.toolset).run(transport='stdio')
 
 
 if __name__ == '__main__': main()

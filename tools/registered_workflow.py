@@ -18,32 +18,14 @@ from assistant_contract import REGISTERED_PHASES
 def _collect_existing(session):
     from submission import verify_applicant_agreement, verify_applicant_prepared_list
     from applicant_batch import record_existing_submission
+    from finance_bill_state import index_bills, bound_bill, state as bill_state
 
     case = session.ids[0]
-    tab = session.begin_case(case, force_new=True)
-    session.job(
-        case,
-        'invoice_verification',
-        {
-            'action': 'view',
-            'view': 'in-progress',
-            'tab_id': tab,
-            'expected_userid': session.cfg['expected_userid'],
-        },
-        'initial-in-progress-view',
-    )
-    for attempt in range(12):
-        result, native = session.job(
-            case, 'read_system', {'mode': 'readback', 'tab_id': tab}, 'initial-workflow-list'
-        )
-        if any(
-            str(g.get('funcno')) == '101' and g.get('visible') and not g.get('loading')
-            for g in native.get('grids', [])
-        ):
-            break
-        time.sleep(0.25)
-    else:
-        raise APIError('registered_initial_list', '原生审批中列表尚未就绪，仅回读')
+    result, native = session.job(case, 'business', {
+        'action': 'bills-list', 'tab_id': session.state['tab_id'],
+        'expected_userid': session.cfg['expected_userid'],
+    }, 'initial-workflow-list')
+    index_bills(native, session.cfg['expected_userid'])
     art = next(a for a in result['artifacts'] if a['name'] == 'output.json')
     ref = {
         'case_id': case,
@@ -55,6 +37,19 @@ def _collect_existing(session):
     for current in session.ids:
         f = read_json(session.service.resolve(current)[1]['form'])
         try:
+            row = bound_bill(native, f['serial'], session.cfg['expected_userid'], f['amount'])
+        except (KeyError, ValueError):
+            session.initial_states[current] = {'status': 'held_native_binding',
+                'issues': ['完整本人清单未匹配本案单号及金额'], 'native_evidence': ref}
+            continue
+        classified = bill_state(row)
+        terminal = {'ready_for_delivery': 'already_approved_ready_verified', 'paid': 'already_paid_verified',
+                    'returned_after_approval': 'held_returned_after_approval', 'unknown': 'held_native_state'}
+        if classified in terminal:
+            session.initial_states[current] = {'status': terminal[classified], 'native_evidence': ref,
+                'observed_status': row.get('t.status_name')}
+            continue
+        try:
             verify_applicant_agreement(
                 native,
                 f['serial'],
@@ -62,6 +57,9 @@ def _collect_existing(session):
                 f['amount'],
                 f['basic'].get('teacher_name'),
             )
+        except ValueError:
+            pass
+        else:
             record_existing_submission(
                 session.service, current, session.cfg['expected_userid'], ref
             )
@@ -70,8 +68,6 @@ def _collect_existing(session):
                 'native_evidence': ref,
             }
             continue
-        except ValueError:
-            pass
         try:
             verify_applicant_prepared_list(
                 native, f['serial'], session.cfg['expected_userid'], f['amount']
@@ -81,18 +77,20 @@ def _collect_existing(session):
                 'native_evidence': ref,
             }
         except ValueError:
-            pass
+            if classified != 'draft':
+                session.initial_states[current] = {'status': 'held_native_state', 'native_evidence': ref,
+                    'observed_status': row.get('t.status_name')}
     atomic_json(
         session.folder / 'initial-workflow-states.json',
         {'states': session.initial_states, 'native_evidence': ref},
     )
 
 
-def run_registered_workflow(service, *, case_id, phase='ready', execute=False, progress=None):
+def run_registered_workflow(service, *, case_id, phase='ready', execute=False, progress=None, print_options=None):
     if type(execute) is not bool:
-        raise APIError('registered_execute', 'execute须为布尔值；字符串不能触发执行')
+        raise APIError('registered_execute', 'execute must be bool')
     if phase not in REGISTERED_PHASES:
-        raise APIError('registered_phase', '未知登记工作流阶段')
+        raise APIError('registered_phase', 'unknown workflow phase')
     # One lease covers bootstrap, window retirement, finance and delivery. A
     # second invocation must not touch the first invocation's browser scene.
     try:
@@ -102,19 +100,27 @@ def run_registered_workflow(service, *, case_id, phase='ready', execute=False, p
             else nullcontext()
         ):
             return _run_registered_workflow(
-                service, case_id=case_id, phase=phase, execute=execute, progress=progress
+                service, case_id=case_id, phase=phase, execute=execute, progress=progress, print_options=print_options
             )
     except RuntimeError as error:
         raise APIError(getattr(error, 'code', 'registered_workflow_busy'), str(error)) from error
 
 
-def _run_registered_workflow(service, *, case_id, phase='ready', execute=False, progress=None):
+def _run_registered_workflow(service, *, case_id, phase='ready', execute=False, progress=None, print_options=None):
+    if print_options and phase != 'print':
+        raise APIError('print_options_phase', '打印选项只用于print阶段')
+    if phase == 'print':
+        from finance_print_batch import run
+        return run(service, case_id, execute=execute, progress=progress, **(print_options or {}))
     cfg, index, auth, definition = load_definition(service, case_id)
     if phase not in REGISTERED_PHASES:
         raise APIError(
             'registered_phase',
             '登记入口支持fill、ready、materials、approve、export-system、export-list、finish和status',
         )
+    if execute and phase not in {'status','materials','approve'} and 'execution_mode' in cfg:
+        from finance_execution_mode import inherit_batch_mode
+        inherit_batch_mode(service,case_id,[row['case_id']for row in read_json(index)['documents']])
     if phase == 'export-list':
         from grid_export_workflow import run_grid_export
 
@@ -270,22 +276,8 @@ def _run_registered_workflow(service, *, case_id, phase='ready', execute=False, 
         runner.recover_pending(item, plan, pending, recorded_only=True)
     session = RegisteredSession(service, case_id, cfg, index, auth, progress)
     session.ensure()
-    from reimbursement_workflow import _run_workflow
-
-    if not any(service.overview(c).get('unverified_write') for c in session.ids):
-        _collect_existing(session)
-    result = _run_workflow(
-        service,
-        scenario=cfg['scenario'],
-        batch_index=str(index),
-        phase='run' if phase == 'fill' else 'prepare-submit',
-        submission_authorization=str(auth),
-        tab_id=session.state['tab_id'],
-        expected_userid=cfg['expected_userid'],
-        execute=True,
-        progress=progress,
-        workspace=session,
-    )
+    from finance_registered_native import run_registered_native
+    result=run_registered_native(service,session,items,auth,phase,progress)
     atomic_json(session.state_path, session.state)
     result.update(
         case_id=case_id,

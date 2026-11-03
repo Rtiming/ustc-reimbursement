@@ -1,0 +1,31 @@
+{
+  "schema": "ustc-native-approver-contract-v1",
+  "source": "Read-only school W74/W76 and current native handlers observed 2026-11-03; no teacher write qualification implied.",
+  "list_definition_sha256": "d52b3712b17753d1b10150499bbeb2655249c4453f420897f3209ee3e2ab66af",
+  "approval_definition_sha256": "27e30639b99ae5375bfa4df96a8fa2c3ddc64153f19d681749ccbe7c581a905f",
+  "buttons": {
+    "agree": {
+      "btnguid": "EF5365A90D3947A8B0272D9339EA8076",
+      "before_sha256": "b5cf4854d0939be4207e4646470bafcfefce6667a203ce0ae9270d21929f39d7",
+      "after_sha256": "162e45aa7a4a9da6101c94c436367166fe6b95cdea9a7bd91f4659df6991b6c5"
+    },
+    "reject": {
+      "btnguid": "021A49D609EF44ABA8264E1771C03D63",
+      "before_sha256": "a15554e0d161e6e289cd7b40c82f4d2c039e48c2639015bbd3d6f4e220b66827",
+      "after_sha256": "f829333311d0b3ced69ea68a8e8705799cf84aa3ba624f3a8ca0e5884d913232"
+    }
+  },
+  "verification_guard_sha256": "a6de33c9ce7f9fbbc08b83c1e3f7bf7567f9616ead0aed34bc0b94f448252488",
+  "agreement_guard_sha256": "fc18efeac14b1743adc83f98c2627996c22eec62b1d80816adef1aad80a060e0",
+  "generate_command_sha256": "6e3db45fdead08b2496c01b2ecd715021a62357a77d8a4aa69b8f847e25b4bc4",
+  "button_engine_sha256": "0ae94460df6ec38fe02af75bd6724123def589f49902e3a7a15b1ad499234cb6",
+  "pdf_compensation_sha256": "31886b1c32a812d259643de7fb24d419c7210dde06e3c1e2a3df68b9f0f19ec5",
+  "after_lc_agree_sha256": "7df2cc229b8aff8332ef671602bac8dd31b1e2b0e42099c78a5af2cfeeac33c0",
+  "after_lc_agree_bxpdf_sha256": "01a864f8893ded15495a8f3c07d51579cdc01978a32b823fd84418abd7d7602a",
+  "verification_definition_sha256": "97ff32951c5f429c1be914bdf20f98d8362815363f22162a4ca7f5fa4cb9e4b2",
+  "page_open_external_sha256": "5567f837b8f5304e759b3cdb617b883d97fe23aba7515c2c4f1ce0193a0ca397",
+  "verification_callback_sha256": "74627f8d8e21103dba1adc31b9bc445b10f4ba768ed398a706d984c212885226",
+  "context_set_data_sha256": "73524ececccb1c4cbc856b7bd276a4d8ad43ce048c1e24066e4625fac1b2de2d",
+  "rejection_guard_sha256": "cfa5a5961cb36a40f5b57b1fdbb9a8b57749fb6863acc44e70b096c0922a67f4",
+  "signature_model_sha256": "95b6cab997227263ac135b50776a1c797e6029f5a4e0a77c871c68d34990aa44"
+}

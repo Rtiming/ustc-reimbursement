@@ -118,6 +118,15 @@ def grid_state(receipt, grid, allow_missing_selection=False):
         raise ValueError('本次可见目标表格必须唯一')
     g = gs[0]
     rows = g.get('rows', [])
+    if b.get('business_transport')=='native_http' and b.get('mode')=='case_manifest_selection':
+        local=b.get('case_selection',{})
+        if (g.get('complete')is not True or g.get('records')!=len(rows)or b.get('scopeComplete')is not True
+                or local.get('source')!='local_case_manifest' or local.get('unbound')is not True
+                or local.get('server_selection_observed')is not False):raise ValueError('HTTP完整票池与本案冻结选择证明不足')
+        ids=[value(r,'native_guid')for r in rows];selected=local.get('guids')
+        if not isinstance(selected,list)or len(set(ids))!=len(ids)or any(not x for x in ids)or len(set(selected))!=len(selected)or not set(selected).issubset(ids):
+            raise ValueError('本案冻结GUID不在完整票池或存在重复')
+        return b,g,list(zip(ids,rows)),sorted(selected)
     if g.get('loading') or g.get('records') != len(rows) or g.get('allRecordsVisible') is False:
         raise ValueError('需要完整分页收集或全部记录已加载，首屏不代表全量')
     if len({value(r, 'native_guid') for r in rows}) != len(rows) or any(not value(r, 'native_guid') for r in rows):
@@ -231,6 +240,7 @@ def preview(request, manifest, receipt, audit_receipts):
     if manifest.get('case_id') != request['case_id']:
         raise ValueError('清单与请求不是同案')
     b, g, rows, actual_before = grid_state(receipt, request['grid'], allow_missing_selection=True)
+    native=b.get('business_transport')=='native_http' and b.get('mode')=='case_manifest_selection'
     tabs = observed_tabs(receipt)
     if any(tab != request['tab_id'] for tab in tabs):
         raise ValueError('原生回执不是本次请求的tab_id')
@@ -299,7 +309,7 @@ def preview(request, manifest, receipt, audit_receipts):
         candidate_amount = str(sum((money(value(row, 'amount')) for _, row in targets), Decimal('0')))
     except ValueError:
         candidate_amount = None  # 取消错误票不因其显示金额格式错误而被卡住。
-    return {'schema': SCHEMA, 'case_id': request['case_id'], 'request': request, 'identity': b['identity'],
+    result={'schema': SCHEMA, 'case_id': request['case_id'], 'request': request, 'identity': b['identity'],
             'current_page': str(b.get('currentPage')), 'serial_context': text(b.get('serial')) if 'serial' in b else None, 'node_context': text(b.get('node')) if 'node' in b else None,
             'context_available': all(key in b for key in ['serial', 'node']),
             'observed_tab_id': tabs[0] if tabs else None,
@@ -311,6 +321,17 @@ def preview(request, manifest, receipt, audit_receipts):
             'candidate_amount': candidate_amount,
             'executed': False, 'selection_write': False, 'draft_created': False, 'submitted': False,
             'note': '移除仅取消勾选，不删除票据；新增门槛独立于财务系统NORMAL。'}
+    if native:
+        local=b['case_selection']
+        result.update(business_transport='native_http',selection_source='local_case_manifest',
+            local_selection_available=True,local_context_unbound=local['unbound'],selection_available=False,
+            context_available=False,serial_context=None,node_context=None,current_page=None,
+            case_manifest_sha256=local['manifest_sha256'],form_sha256=local['form_sha256'],
+            scope={'complete':True,'records':g['records'],'rendered_guids':[],'record_guids':sorted(value(r,'native_guid')for _,r in rows)},
+            apply_ready=request['grid']=='53'and local['unbound'],unsupported_reason=None,
+            note='仅更新本案manifest中的冻结GUID集，不改变页面勾选、不建单或提交。')
+    return result
+
 
 
 def snapshot_script(request):
@@ -412,8 +433,10 @@ def run_browser(source, request, output):
     script = output.with_suffix('.js')
     if output.exists() or script.exists():
         raise ValueError('保留旧请求回执；输出已存在，不重放')
-    script.parent.mkdir(parents=True, exist_ok=True);script.write_text(source)
-    subprocess.run([sys.executable, str(ROOT/'tools/edge_runtime.py'), str(script), '--tab-id', request['tab_id'], '--output', str(output), '--quiet', '--timeout', '60'], check=False)
+    script.parent.mkdir(parents=True, exist_ok=True);script.write_text(source,encoding='utf-8',newline='\n')
+    from registered_page_owner import RegisteredPageOwner
+    RegisteredPageOwner.before_child_dispatch(request['tab_id'])
+    subprocess.run([sys.executable, str(ROOT/'tools/edge_runtime.py'), str(script), '--tab-id', request['tab_id'], '--output', str(output), '--quiet', '--timeout', '60','--operation-kind','read'], check=False)
     if not output.exists():
         raise RuntimeError('桥接未留下结果；不得重发写请求')
     return json.loads(output.read_text())
@@ -427,7 +450,7 @@ def write(path, data):
     path = Path(path)
     if path.exists():
         raise ValueError('不覆盖既有选票/读回回执')
-    path.parent.mkdir(parents=True, exist_ok=True);path.write_text(json.dumps(data, ensure_ascii=False, indent=2)+'\n')
+    path.parent.mkdir(parents=True, exist_ok=True);path.write_text(json.dumps(data, ensure_ascii=False, indent=2)+'\n',encoding='utf-8',newline='\n')
 
 
 def main():
@@ -435,6 +458,7 @@ def main():
     ap.add_argument('command', nargs='?', default='preview', choices=['preview', 'apply', 'readback'])
     ap.add_argument('--request', type=Path);ap.add_argument('--case-manifest', type=Path);ap.add_argument('--audit-receipts', type=Path, nargs='+')
     ap.add_argument('--snapshot', type=Path);ap.add_argument('--preview', type=Path);ap.add_argument('--preview-sha256')
+    ap.add_argument('--bundle',type=Path);ap.add_argument('--native-http',action='store_true')
     ap.add_argument('--execute', action='store_true');ap.add_argument('--request-id');ap.add_argument('--output', type=Path, required=True)
     args = ap.parse_args()
     if args.output.exists():
@@ -444,7 +468,15 @@ def main():
             ap.error('preview需要request/case-manifest/audit-receipts，不能带execute')
         request = validate_request(load(args.request))
         snapshot = args.snapshot or args.output.with_name(args.output.stem+'-snapshot.json')
-        receipt = load(snapshot) if args.snapshot else run_browser(snapshot_script(request), request, snapshot)
+        if args.native_http and (not args.snapshot or body(load(args.snapshot)).get('business_transport')=='native_http'):
+            if not args.bundle:raise ValueError('HTTP冻结选票须绑定本案operator')
+            from operator_support import bundle
+            from finance_native_selection import snapshot as native_snapshot
+            _,paths=bundle(args.bundle)
+            if args.snapshot:snapshot=args.output.with_name(args.output.stem+'-snapshot.json')
+            receipt=native_snapshot(request,paths,snapshot,args.snapshot)
+        else:
+            receipt = load(snapshot) if args.snapshot else run_browser(snapshot_script(request), request, snapshot)
         plan = preview(request, load(args.case_manifest), receipt, [load(p) for p in args.audit_receipts])
         plan['evidence'] = {name: {'path': str(path.resolve()), 'sha256': sha(path)} for name, path in [('request', args.request), ('case_manifest', args.case_manifest), ('snapshot', snapshot)]}
         plan['evidence']['audit_receipts'] = [{'path': str(p.resolve()), 'sha256': sha(p)} for p in args.audit_receipts]
@@ -456,6 +488,19 @@ def main():
     plan = load(args.preview)
     if args.command == 'apply' and plan.get('apply_ready') is not True:
         raise ValueError(plan.get('unsupported_reason') or '预览未放行')
+    if plan.get('business_transport')=='native_http':
+        if not args.bundle:raise ValueError('HTTP冻结选票须绑定本案operator')
+        from finance_native_selection import apply as native_apply,readback as native_readback,snapshot as native_snapshot
+        from operator_support import bundle
+        _,paths=bundle(args.bundle)
+        if args.command=='apply':
+            if not args.execute or not args.request_id:raise ValueError('冻结选择须execute和稳定请求号')
+            native_apply(plan,args.preview,args.bundle,args.output,args.request_id)
+        else:
+            observed=native_snapshot(plan['request'],paths,args.output.with_name(args.output.stem+'-snapshot.json'))
+            write(args.output,native_readback(plan,paths,observed))
+        return
+    if args.command=='apply' and args.execute:raise ValueError('native_http_adapter_required: 旧页面勾选不再派发')
     request = {**plan['request'], 'expected_before_guids': plan['before_guids']}
     if args.command == 'readback':
         if plan.get('after_guids') is None:

@@ -1,0 +1,24 @@
+{
+  "schema": "ustc-finance-notes-contract-v1",
+  "winno": "54",
+  "funcno": "76",
+  "xtype": "33&33",
+  "definition_sha256": "0b3de6b5fddbdb7d8a6b010d57897841e00401d669b26ccfbdb6f8a69326b03a",
+  "save_button": "CE776440D55444A49EE618E0EF97C318",
+  "initialization_keys": [
+    "61-SPEC_OPTIONS",
+    "0-spec_des",
+    "0-SPEC_OPTIONS",
+    "0-xtype",
+    "61-upload_desc",
+    "61-spec_filetype",
+    "61-spec_filetype_ts",
+    "61-qita_model",
+    "61-write_isnull",
+    "61-upload_isnull",
+    "61-option_isnotnull",
+    "61-spec_des",
+    "61-upload_model",
+    "76-spec_abst"
+  ]
+}

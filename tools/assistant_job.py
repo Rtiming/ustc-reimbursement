@@ -44,37 +44,58 @@ def retain_unverified_cleanup(service, case_id, folder, result, cleanup):
 def run(request_file, frozen_request=None):
     folder = request_file.parent
     request = frozen_request if frozen_request is not None else read_json(request_file)
+    from worker_context import applied
+    with applied(request['workspace'],request.get('runtime_context')):
+        return run_in_context(request_file,request)
+
+
+def run_in_context(request_file, request):
+    folder = request_file.parent
     service = AssistantService(request['workspace'], request['material_roots'], request['python'])
     material_task = request['operation'] in MATERIAL_OPERATIONS
     ocr_task = request['operation'] == 'material_ocr'
+    print_batch_task = request['operation'] == 'print_batch'
     external = request['execute'] and not material_task and not (request['operation']=='invoice' and request['parameters'].get('action')=='read')
-    result = {'status': 'failed', 'started_at_utc': stamp(), 'system_result_verified': False, 'external_action_requested': external}
+    result = {'status': 'failed', 'started_at_utc': stamp(), 'system_result_verified': False, 'external_action_requested': external,'business_command_dispatched':False}
+    if request.get('runtime_context'):
+        result['runtime_context_applied'] = all(os.environ.get(k)==v for k,v in request['runtime_context'].items())
+        result['runtime_context_keys'] = sorted(request['runtime_context'])
+        if not result['runtime_context_applied']:
+            raise APIError('runtime_context_missing','独立worker未继承冻结连接身份；未派发业务')
     if material_task:
         result.update(material_task=True, system_write=False, filesystem_action_requested=request['execute'])
         if not ocr_task:
             result['local_material_task'] = True
     try:
-        browser_operation = not material_task and (request['operation'] in ['tabs', 'read_system', 'access', 'invoice_verification', 'invoice_selection', 'invoice_retry'] or request['execute'])
+        local_coverage = request['operation'] == 'business' and request['parameters'].get('action') == 'print-coverage'
+        browser_operation = not material_task and not print_batch_task and not local_coverage and (request['operation'] in ['approver_batch','business', 'tabs', 'read_system', 'access', 'invoice_verification', 'invoice_selection', 'invoice_retry'] or request['execute'])
         with service.mutex(request['case_id'], wait=3), (service.mutex(request['case_id'], wait=3, browser=True) if browser_operation else nullcontext()):
             from finance_open_draft import is_open_draft, ensure_globally_idle,pending_read_reference
             if is_open_draft(request):
                 a=request['parameters'];recovery=pending_read_reference(a)
                 ensure_globally_idle(service, request['case_id'], folder.name, target_tab_id=a.get('tab_id'),**({'recovery_source':recovery}if recovery else{}))
             if service.revision(request['case_id']) != request['revision']: raise APIError('revision_conflict', '排队后案件输入已变，任务未执行；overview核对')
+            from finance_transport_policy import check_dispatch
+            check_dispatch(request)
             _, paths = service.resolve(request['case_id'])
             receipts = paths['state'].parent/'receipts'
             before = set(receipts.rglob('*.json')) if not material_task and receipts.exists() else set()
             cmd = service.command(request, folder)
+            if browser_operation:
+                from finance_execution_mode import prepare_focus
+                focus=prepare_focus(request,paths['case'],folder)
+                if focus:result['execution_mode']=focus
             atomic_json(folder/'running.json', {'worker_pid': os.getpid()})
             atomic_json(folder/'status.json', {**result, 'status': 'running', 'operation': request['operation']})
             timed_out = False
             with (folder/'stdout.log').open('w', encoding='utf-8') as out, (folder/'stderr.log').open('w', encoding='utf-8') as err:
                 process, command_owner = start_command(cmd, cwd=PROJECT, env=child_env(), stdout=out, stderr=err)
+                result['business_command_dispatched']=True
                 # worker退出不代表它已派发的命令退出；恢复时分别核对，不能据父PID删锁。
                 atomic_json(folder/'running.json', {'worker_pid': os.getpid(), 'command_pid': process.pid,
                                                   'command_started_at_utc': stamp()})
                 try:
-                    try: code = process.wait(timeout=300)
+                    try: code = process.wait(timeout=3600 if print_batch_task or request['operation']=='approver_batch' else 300)
                     except subprocess.TimeoutExpired:
                         timed_out = True
                         if command_owner is not None:
@@ -109,9 +130,12 @@ def run(request_file, frozen_request=None):
             candidates = sorted(set(receipts.rglob('*.json'))-before) if not material_task and receipts.exists() else []
             for p in [folder/'output.json', folder/'activity.docx', folder/'render/render_receipt.json']:
                 if p.exists(): candidates.append(p)
+            if (folder/'remuneration_input.json').exists():candidates.append(folder/'remuneration_input.json')
+            if (folder/'execution-mode.json').exists():candidates.append(folder/'execution-mode.json')
+            if (folder/'execution-health.json').exists():candidates.append(folder/'execution-health.json')
             # 新正式能力只登记固定子回执，供同案SHA回读/恢复；不扫描任意路径。
             if request['operation'] == 'invoice_selection':
-                for name in ['output-snapshot.json', 'output-before.json', 'output-native.json', 'output-after.json', 'output-after-error.json']:
+                for name in ['output-snapshot.json', 'output-before.json', 'output-native.json', 'output-after.json', 'output-after-error.json','selection-intent.json']:
                     p = folder/name
                     if p.exists(): candidates.append(p)
             elif request['operation'] == 'invoice_sources':
@@ -123,7 +147,7 @@ def run(request_file, frozen_request=None):
                     p = folder/name
                     if p.exists(): candidates.append(p)
             elif request['operation'] == 'pdf_export':
-                for name in ['intent.json','export_receipt.json','failure.json']:
+                for name in ['intent.json','export_receipt.json','rejection_receipt.json','failure.json']:
                     p = folder/'pdf_export'/name
                     if p.exists(): candidates.append(p)
                 if values:
@@ -146,6 +170,14 @@ def run(request_file, frozen_request=None):
                 for name in ['native.json', 'inspection.json']:
                     p = folder/name
                     if p.exists(): candidates.append(p)
+            if request['operation'] in {'invoice','business'}:
+                for name in ['native-create-input.json','native-create-execution.json','native-create-prepare.json','native-create.json','native-create-recovered.json','native-create-readback.json','create-recovery-source.json']:
+                    p=folder/name
+                    if p.exists():candidates.append(p)
+            if request['operation']=='submission':
+                for name in ['native-submission-input.json','native-submission-prepare.json']:
+                    p=folder/name
+                    if p.exists():candidates.append(p)
             artifacts = []
             for i, p in enumerate(candidates):
                 artifacts.append({'artifact_id': 'a'+str(i), 'name': p.name, 'path': str(p.resolve()), 'sha256': hashlib.sha256(p.read_bytes()).hexdigest(), 'format': p.suffix[1:]})

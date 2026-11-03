@@ -1,0 +1,9 @@
+{
+  "schema": "ustc-basic-http-contract-v1",
+  "definition_sha256": "72e611785970f0b7d7d0a100761edb551196dd0fb7080109fe1eeefa0fafdbfe",
+  "winno": "43",
+  "funcno": "60",
+  "save_button": "D6D6320B753E4E21965F2D5D66F21CAB",
+  "native_source": "school WF_YBX loadDefinition W43; checked 2026-10-28",
+  "write_route": "stage/basic"
+}

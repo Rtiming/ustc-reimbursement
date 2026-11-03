@@ -34,7 +34,7 @@ def load(path):
 def write(path, value):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open('x', encoding='utf-8') as stream:
+    with path.open('x', encoding='utf-8', newline='\n') as stream:
         json.dump(value, stream, ensure_ascii=False, indent=2)
         stream.write('\n')
 
@@ -164,6 +164,7 @@ def preview(request, manifest, pool_receipt, recognition_receipt, inspection):
     from finance_invoice_reconcile import grid_scope, validate_sources, invoice_number
     from finance_surface import parse_recognition_error
     request = validate_request(request)
+    native = body(inspection).get('business_transport') == 'native_http'
     action, grid = request.get('action'), request['grid']
     if action not in ('refresh', 'reidentify', 'cleanup'):
         raise ValueError('预览action只支持refresh/reidentify/cleanup')
@@ -179,7 +180,7 @@ def preview(request, manifest, pool_receipt, recognition_receipt, inspection):
         raise ValueError('检查回执账号或原生范围不符')
     if str(observed.get('grid', {}).get('funcno')) != grid or observed['grid'].get('loading') is not False:
         raise ValueError('指定表检查未完成加载')
-    if observed.get('definitionCaptureComplete') is not True or observed.get('dialogs') or observed.get('context', {}).get('serial'):
+    if observed.get('definitionCaptureComplete') is not True or not native and (observed.get('dialogs') or observed.get('context', {}).get('serial')):
         raise ValueError('定义不完整、有未处理弹框或当前有报销单上下文')
     supplied = request.get('targets', [])
     if not isinstance(supplied, list) or len(supplied) > 20 or (action == 'refresh') != (len(supplied) == 0):
@@ -218,8 +219,14 @@ def preview(request, manifest, pool_receipt, recognition_receipt, inspection):
             if action == 'reidentify' and any(source_matches(r, source) for r in pool['rows']):
                 raise ValueError('同票号已存在完整票池，应先归账核对，不能再次重识别')
             filename = native_field(row, 'show_filename')
+            upload_binding=None
             if filename != source_sha + '.pdf':
-                raise ValueError('113目标必须有与本案源SHA完全相符的原生文件名')
+                if native:
+                    from finance_native_upload import validate_error_binding
+                    bindings=[b for b in manifest.get('native_upload_bindings',[])if b.get('source_sha256')==source_sha
+                        and b.get('invoice_number')==number and str(b.get('filecode','')).lower()==value.lower() and b.get('filename')==filename]
+                    if len(bindings)==1:upload_binding=validate_error_binding(bindings[0],request['case_id'],request['expected_userid'])
+                if upload_binding is None:raise ValueError('113目标须有SHA文件名或原HTTP上传ACK/filecode精确绑定')
             error = parse_recognition_error(native_field(row, 'show_err_msg'))
             if action == 'reidentify' and error['error_type'] == 'duplicate_reserved_invoice':
                 raise ValueError('预约占用票不能按普通重识别反复尝试')
@@ -227,13 +234,14 @@ def preview(request, manifest, pool_receipt, recognition_receipt, inspection):
                 raise ValueError('无错待识别先刷新或单票重识别，不直接当失败记录清理')
             scope = ('仅删除本账号失败上传队列记录；预约仍受阻，不释放他人预约'
                      if error['error_type'] == 'duplicate_reserved_invoice' else '仅处理本账号识别记录，不修改原始票据或他人预约')
+        binding_fields=({'native_filename':filename, **({'native_upload_binding':upload_binding}if upload_binding else{})} if native and grid=='113' else {})
         targets.append({'invoice_number': number, **({'invoice_code': identity[1]} if identity[0] == 'medical' else {}),
             'source_sha256': source_sha, 'source_path': source['path'],
-            'native_key': key, 'native_value': value, 'native_row': row, 'recognition_error': error, 'cleanup_scope': scope})
+            'native_key': key, 'native_value': value, 'native_row': row, **binding_fields, 'recognition_error': error, 'cleanup_scope': scope})
     selected = observed['grid'].get('selectedRowIds')
-    if not isinstance(selected, list):
+    if not native and not isinstance(selected, list):
         raise ValueError('未取得真实原生勾选集合')
-    if action != 'refresh':
+    if not native and action != 'refresh':
         visible_ids = observed['grid'].get('rowIds')
         if not isinstance(visible_ids, list) or len(visible_ids) != len(observed['grid']['rows']):
             raise ValueError('未取得与当前行一一对应的原生行ID')
@@ -245,7 +253,13 @@ def preview(request, manifest, pool_receipt, recognition_receipt, inspection):
     definitions = [d for d in observed.get('buttonDefinitions', []) if d.get('caption') == caption]
     controls = [c for c in observed.get('controls', []) if c.get('btnname') == caption and c.get('visible') is True and c.get('disabled') is False]
     reasons, definition, refresh_control = [], None, None
-    if action == 'refresh':
+    if native:
+        if action == 'reidentify' and observed.get('native_ocr_contract_verified') is not True:
+            reasons.append('原生OCR固定回调合同未完整核实')
+        if action != 'refresh' and len(definitions) != 1:
+            reasons.append('HTTP清理定义不唯一')
+        definition = definitions[0] if len(definitions) == 1 else None
+    elif action == 'refresh':
         refreshes = [n for c in observed.get('refreshTextControls', []) if c.get('visible') is True and c.get('text') == '刷新'
                      for n in c.get('nativeNodes', []) if n.get('id') == 'gridWF_YBX_113_refresh' and n.get('tag') == 'DIV'
                      and len(n.get('nativeClickHandlers', [])) == 1 and 'reloadGrid' in n['nativeClickHandlers'][0]]
@@ -261,7 +275,7 @@ def preview(request, manifest, pool_receipt, recognition_receipt, inspection):
             reasons.append('删除入口没有明确原生确认步骤')
         if action == 'reidentify' and (definition.get('pre_check') is not True or not definition.get('check_func') or definition.get('clickquery') is not False):
             reasons.append('重识别原生守卫或确认合同改变')
-    return {'schema': PLAN_SCHEMA, 'case_id': request['case_id'], 'action': action, 'request': request,
+    return {**({'business_transport':'native_http'} if native else {}), 'schema': PLAN_SCHEMA, 'case_id': request['case_id'], 'action': action, 'request': request,
         'ready': not reasons, 'readiness_reasons': reasons, 'targets': targets, 'before_selected_row_ids': selected,
         'button_definition': definition, 'refresh_control': refresh_control,
         'selection_callbacks': observed.get('selectionCallbacks'),
@@ -293,6 +307,9 @@ def verify_plan_evidence(plan):
         if not isinstance(item, dict) or sha(item['path']) != item.get('sha256'):
             raise ValueError('预览输入证据已变化，须重新预览')
     for target in plan['targets']:
+        if target.get('native_upload_binding'):
+            from finance_native_upload import validate_error_binding
+            validate_error_binding(target['native_upload_binding'],plan['case_id'],plan['request']['expected_userid'])
         if sha(target['source_path']) != target['source_sha256']:
             raise ValueError('目标原件SHA已变化')
     rebuilt = preview(*(load(evidence[k]['path']) for k in ('request', 'manifest', 'pool', 'recognition', 'inspection')))
@@ -302,6 +319,9 @@ def verify_plan_evidence(plan):
 
 def validate_confirm_evidence(plan, receipt, inspection):
     validate_plan(plan)
+    if plan.get('business_transport')=='native_http':
+        from finance_native_retry import confirm_evidence
+        return confirm_evidence(plan,receipt,inspection)
     if plan['action'] not in ('cleanup', 'reidentify'):
         raise ValueError('只有清理和重识别有已适配的确认步骤')
     action = body(receipt)
@@ -357,6 +377,9 @@ def action_script(plan, request_id, confirm=False):
     validate_plan(plan)
     if not isinstance(request_id, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}', request_id):
         raise ValueError('request_id须为稳定ASCII标识')
+    if plan.get('business_transport')=='native_http':
+        from finance_native_retry import script
+        return script(plan['request'],'confirm' if confirm else plan['action'],plan=plan,request_id=request_id,pending=confirm)
     if plan['action'] == 'refresh':
         if confirm:
             raise ValueError('刷新没有删除确认步骤')
@@ -454,9 +477,15 @@ def validate_readback_evidence(plan, pool_receipt, recognition_receipt, receipt)
         raise ValueError('处理后回读必须为完整票池和识别明细')
     expected_action = 'confirm' if plan['action'] in ('cleanup', 'reidentify') else plan['action']
     expected_phase = {'confirm': 'confirm_button_returned', 'refresh': 'refresh_button_returned', 'reidentify': 'button_returned'}[expected_action]
+    if plan.get('business_transport')=='native_http':
+        expected_phase = 'confirm_http_received' if expected_action=='confirm' else 'refresh_http_received'
     if not isinstance(receipt, dict) or receipt.get('schema') != 'ustc-edge-operation-v2' or receipt.get('phase') != 'script_completed' or receipt.get('tab_id') != req['tab_id']:
         raise ValueError('处理后回读须引用本次成功动作的原始运行时回执')
     action = body(receipt)
+    if (plan.get('business_transport')=='native_http' and expected_action=='confirm'
+            and action.get('server_accepted')is False and action.get('server_status')=='error'
+            and action.get('marker',{}).get('phase')=='confirm_http_rejected'):
+        expected_phase='confirm_http_rejected'
     if action.get('case_id') != plan['case_id'] or action.get('action') != expected_action or action.get('marker', {}).get('plan_digest') != digest(plan) or action.get('marker', {}).get('phase') != expected_phase:
         raise ValueError('处理后回读动作、计划或执行阶段不符；cleanup/reidentify须引用confirm')
     executed = parse_observed_time(receipt.get('executed_at_utc'))
@@ -481,10 +510,12 @@ def readback(plan, pool_receipt, recognition_receipt, receipt):
         exact = [r for r in rows if native_field(r, target['native_key']) == target['native_value']]
         source = {'invoice_number_candidates': [target['invoice_number']], 'invoice_code': target.get('invoice_code')}
         pool_matches = [r for r in pool['rows'] if source_matches(r, source)]
-        recognition_matches = [r for r in recognition['rows'] if native_field(r, 'show_filename') == target['source_sha256']+'.pdf']
+        recognition_matches = [r for r in recognition['rows'] if native_field(r, 'show_filename') == target.get('native_filename',target['source_sha256']+'.pdf')]
         reserved = target.get('recognition_error', {}).get('error_type') == 'duplicate_reserved_invoice' if target.get('recognition_error') else False
-        result.append({**target, 'native_record_absent': not exact, 'pool_rows': pool_matches, 'recognition_rows': recognition_matches,
+        result.append({**target, 'native_record_absent': not exact, 'native_target_fields_unchanged': exact == [target['native_row']], 'pool_rows': pool_matches, 'recognition_rows': recognition_matches,
             'recognition_errors': [parse_recognition_error(native_field(r,'show_err_msg')) for r in recognition_matches],
+            'authenticated_pool_record': len(pool_matches)==1 and not recognition_matches and native_field(pool_matches[0],'tk_mod_flag')=='NORMAL' and native_field(pool_matches[0],'auth_rst_desc')=='正常(已认证)',
+            'recognition_error_persists': not pool_matches and len(recognition_matches)==1 and native_field(recognition_matches[0],'filesequcode')==target['native_value'] and bool(text(native_field(recognition_matches[0],'show_err_msg'))),
             'local_state': ('预约仍受阻，仅本账号失败上传记录已清理' if reserved and not exact else
                             '原异常池记录已清理，尚未据此确认重传或认证' if plan['action']=='cleanup' and not exact else
                             '仍有识别记录，结果按完整回执判断' if recognition_matches else '已观察到同票号池记录' if pool_matches else '未观察到可归账记录，不能认定成功'),
@@ -493,7 +524,11 @@ def readback(plan, pool_receipt, recognition_receipt, receipt):
     missing_protected = [key for key in plan['protected_native_ids'] if key not in current_keys]
     return {'schema': 'ustc-finance-invoice-retry-readback-v1', 'case_id': plan['case_id'], 'action': plan['action'],
         'action_evidence': verified['action_evidence'],
-        'complete': True, 'targets': result, 'all_target_records_absent': bool(result) and all(r['native_record_absent'] for r in result),
+        **({'business_transport':'native_http','server_accepted':body(receipt).get('server_accepted'),
+            'server_status':body(receipt).get('server_status'),'ocr_status':body(receipt).get('ocr_status')} if plan.get('business_transport')=='native_http' else {}),
+        'complete': True, 'targets': result,
+        'all_targets_authenticated': bool(result) and all(r['authenticated_pool_record'] for r in result),
+        'all_targets_have_recognition_error': bool(result) and all(r['recognition_error_persists'] for r in result), 'all_target_records_absent': bool(result) and all(r['native_record_absent'] for r in result),
         'protected_record_changes': missing_protected, 'protected_records_unchanged': not missing_protected,
         'system_write': False, 'reservation_released': False, 'retry_automatically': False}
 
@@ -504,8 +539,10 @@ def run_browser(source, request, output, operation_kind='read', keep_internal_ta
     if output.exists() or script.exists():
         raise ValueError('回执或脚本已存在，保留原标记而不重放')
     script.parent.mkdir(parents=True, exist_ok=True)
-    with script.open('x', encoding='utf-8') as stream:
+    with script.open('x', encoding='utf-8', newline='\n') as stream:
         stream.write(source)
+    from registered_page_owner import RegisteredPageOwner
+    RegisteredPageOwner.before_child_dispatch(request['tab_id'])
     subprocess.run([sys.executable, str(ROOT/'tools/edge_runtime.py'), str(script), '--tab-id', request['tab_id'],
                     '--output', str(output), '--quiet', '--timeout', '60', '--operation-kind', operation_kind]+(['--keep-internal-tab'] if keep_internal_tab else []), check=False)
     if not output.exists():
@@ -521,6 +558,11 @@ def main():
     parser.add_argument('--plan-sha256')
     parser.add_argument('--receipt-sha256')
     parser.add_argument('--request-id')
+    parser.add_argument('--native-http',action='store_true')
+    parser.add_argument('--bundle',type=Path)
+    parser.add_argument('--original-runtime',type=Path)
+    parser.add_argument('--original-runtime-sha256')
+    parser.add_argument('--original-action')
     parser.add_argument('--execute', action='store_true')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
@@ -536,7 +578,8 @@ def main():
     if args.command == 'inspect':
         require('request')
         request = validate_request(load(args.request))
-        result = run_browser(inspect_script(request, args.request_id), request, args.output.parent/'native.json')
+        from finance_native_retry import script as native_script
+        result = run_browser(native_script(request,request_id=args.request_id) if args.native_http else inspect_script(request, args.request_id), request, args.output.parent/'native.json')
         write(args.output, result)
     elif args.command == 'preview':
         require('request', 'manifest', 'pool', 'recognition', 'inspection')
@@ -562,7 +605,12 @@ def main():
             write(args.output, result)
         elif args.command == 'recover':
             require('request_id')
-            result = run_browser(inspect_script(plan['request'], args.request_id), plan['request'], args.output.parent/'native.json')
+            if plan.get('business_transport')=='native_http':
+                require('original_runtime','original_runtime_sha256','original_action')
+                from finance_native_retry import recover_original
+                result=recover_original(plan,args.request_id,args.original_action,args.original_runtime,args.original_runtime_sha256)
+            else:
+                result = run_browser(inspect_script(plan['request'], args.request_id), plan['request'], args.output.parent/'native.json')
             write(args.output, result)
         else:
             require('request_id')
@@ -584,6 +632,18 @@ def main():
                 if intent_path.exists():
                     raise ValueError('该计划动作已有持久意图；只读恢复或独立回读，不重发')
                 intent = {'case_id': plan['case_id'], 'action': args.command, 'request_id': args.request_id, 'plan': reference(args.plan), 'plan_digest': digest(plan), 'created_at': datetime.now(timezone.utc).isoformat(), 'output': str(args.output.resolve())}
+                if plan.get('business_transport')=='native_http':
+                    from operator_support import bundle
+                    from assistant_api import read_json
+                    if not args.bundle:raise ValueError('HTTP清理须绑定本案operator')
+                    _, paths=bundle(args.bundle)
+                    if args.command=='confirm':
+                        from reimburse import begin_write
+                        from finance_native_retry import SCHEMA,REIDENTIFY_SCHEMA
+                        pending_schema=REIDENTIFY_SCHEMA if plan['action']=='reidentify' else SCHEMA
+                        begin_write(paths,read_json(paths['form']),'invoice:http-'+plan['action'],args.output.parent,
+                            {'schema':pending_schema,'plan':str(args.plan.resolve()),'plan_sha256':sha(args.plan)})
+                    elif (paths['state'].parent/'pending_write.json').exists():raise ValueError('已有未核写入，先恢复原任务')
                 write(intent_path, intent)
                 result = run_browser(source, plan['request'], args.output.parent/'native.json', 'browser-local' if args.command == 'refresh' else 'write')
                 write(args.output, result)

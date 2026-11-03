@@ -50,8 +50,9 @@
   }
   async function detailReturn(){
     const intent=binding();
+    const entry=intent.kind==='formal_print'?'PDF打印报销单列表':'报销单列表';
     if(Object.prototype.hasOwnProperty.call(root,'__ustcReimbursementPdfExportV1'))throw Error('DETAIL_EXPORT_UNFINISHED_KEEP_VIEWER');
-    if($.UC.bindData('#61-serialno#')!==p.serial||[...document.querySelectorAll('.ui-dialog')].some(visible)||root.YBX_JSONDATA?.['确认报销信息']?.['入口']!=='报销单列表')throw Error('DETAIL_RETURN_CONTEXT_CHANGED');
+    if($.UC.bindData('#61-serialno#')!==p.serial||[...document.querySelectorAll('.ui-dialog')].some(visible)||root.YBX_JSONDATA?.['确认报销信息']?.['入口']!==entry)throw Error('DETAIL_RETURN_CONTEXT_CHANGED');
     const defs=Object.values($.page.list||{}).flatMap(page=>(page.wins||[]).filter(w=>String(w.winno)==='69').flatMap(w=>w.func_btns||[])).filter(d=>d.btnguid==='090FE1957D6E4BF7840C53C593EF06D3'&&d.caption==='返回');
     if(defs.length!==1||defs[0].call_proc!==false||(defs[0].procs||[]).length||defs[0].wf_trans||!String(defs[0].acts).startsWith("YBX_JSONDATA['确认报销信息']['入口']=='报销单列表'||YBX_JSONDATA['确认报销信息']['入口']=='PDF打印报销单列表':70@")||String(defs[0].afterclick).replace(/\s/g,'')!=='function(op){after_sqwc_return();}')throw Error('DETAIL_RETURN_DEFINITION_CHANGED');
     const buttons=[...document.querySelectorAll('button[guid="090FE1957D6E4BF7840C53C593EF06D3"]')].filter(b=>visible(b)&&!b.disabled&&b.getAttribute('btnname')==='返回');
@@ -111,10 +112,17 @@
     }catch{}}}
     scan(document,0);
     return{ok:true,action:'system_print_read',case_id:c.case_id,serial:p.serial,identity:{userid:p.expected_userid},projid:$.getProjID(),
-      native_serial:$.UC.bindData('#61-serialno#'),phase:intent.phase,dialogs,frames,pdf_ready:frames.some(f=>f.pdf_ready),system_write:false};
+      native_serial:$.UC.bindData('#61-serialno#'),phase:intent.phase,kind:intent.kind,include_invoice_attachments:intent.include_invoice_attachments,dialogs,frames,pdf_ready:frames.some(f=>f.pdf_ready),system_write:false};
+  }
+  function status(){
+    identity();
+    if(Object.prototype.hasOwnProperty.call(root,'__ustcSystemPrintIntentV1'))return read();
+    if([...document.querySelectorAll('.ui-dialog')].some(visible))throw Error('SYSTEM_PRINT_ORIGINAL_SCENE_REQUIRED');
+    ReimbursementSubmission.printInspect();
+    return{ok:true,action:'system_print_status',serial:p.serial,phase:'list_ready',intent_absent:true,system_write:false};
   }
   async function open(){
-    identity();if(p.print_export_authorized!==true||p.include_invoice_attachments!==false)throw Error('SYSTEM_PRINT_AUTHORIZATION_REQUIRED');
+    identity();if(p.print_export_authorized!==true||typeof p.include_invoice_attachments!=='boolean')throw Error('SYSTEM_PRINT_AUTHORIZATION_REQUIRED');
     if(Object.prototype.hasOwnProperty.call(root,'__ustcSystemPrintIntentV1'))throw Error('SYSTEM_PRINT_ORIGINAL_INTENT_EXISTS');
     if($.active!==0||[...document.querySelectorAll('.ui-dialog')].some(visible))throw Error('SYSTEM_PRINT_EDITOR_OR_LOADING');
     const sourceGrid=document.getElementById('gridWF_YBX_101');
@@ -137,29 +145,35 @@
     $(grid).jqGrid('resetSelection');$(grid).jqGrid('setSelection',row.id,true);
     const selected=$(grid).jqGrid('getGridParam','selarrrow');
     if(selected.length!==1||String(selected[0])!==String(row.id))throw Error('SYSTEM_PRINT_SELECTION_CHANGED');
-    Object.defineProperty(root,'__ustcSystemPrintIntentV1',{value:{case_id:c.case_id,serial:p.serial,userid:p.expected_userid,row_id:row.id,phase:'print_open_requested'},configurable:true});
+    Object.defineProperty(root,'__ustcSystemPrintIntentV1',{value:{case_id:c.case_id,serial:p.serial,userid:p.expected_userid,row_id:row.id,phase:'print_open_requested',kind:'formal_print',include_invoice_attachments:p.include_invoice_attachments},configurable:true});
     buttons[0].click();return{ok:true,action:'system_print_open_requested',serial:p.serial,requiresReadback:true,approval_requested:false};
   }
   async function choose(){
-    const intent=binding();if(intent.phase!=='print_open_requested'||p.print_export_authorized!==true||p.include_invoice_attachments!==false)throw Error('SYSTEM_PRINT_CHOICE_NOT_AUTHORIZED');
+    const intent=binding();if(intent.phase!=='print_open_requested'||p.print_export_authorized!==true||typeof p.include_invoice_attachments!=='boolean')throw Error('SYSTEM_PRINT_CHOICE_NOT_AUTHORIZED');
     await callbacks();
     const content=document.getElementById('printBxdWarnMsgBox101'),dialog=content?.closest('.ui-dialog');
     if(!visible(content)||!visible(dialog)||![...document.querySelectorAll('.ui-dialog')].filter(visible).every(x=>x===dialog)||
        !/是否打印发票等附件|为响应节约型校园要求，如您已有纸质附件，本步骤可不打印附件/.test(content.innerText))throw Error('SYSTEM_PRINT_ATTACHMENT_PROMPT_REQUIRED');
     const selected=$('#gridWF_YBX_101').jqGrid('getGridParam','selarrrow');
     if(selected.length!==1||String(selected[0])!==String(intent.row_id))throw Error('SYSTEM_PRINT_SELECTION_CHANGED');
-    const buttons=[...dialog.querySelectorAll('button')].filter(b=>visible(b)&&!b.disabled&&b.innerText.trim()==='否');
-    if(buttons.length!==1)throw Error('SYSTEM_PRINT_NO_ATTACHMENTS_BUTTON_REQUIRED');
-    intent.phase='print_no_attachments_requested';buttons[0].click();
-    return{ok:true,action:'system_print_choice_requested',serial:p.serial,include_invoice_attachments:false,requiresReadback:true,approval_requested:false};
+    if(intent.include_invoice_attachments!==p.include_invoice_attachments)throw Error('SYSTEM_PRINT_OPTIONS_CHANGED');
+    const label=p.include_invoice_attachments?'是':'否';
+    const buttons=[...dialog.querySelectorAll('button')].filter(b=>visible(b)&&!b.disabled&&b.innerText.trim()===label);
+    if(buttons.length!==1)throw Error('SYSTEM_PRINT_ATTACHMENT_CHOICE_REQUIRED');
+    intent.phase='print_requested';buttons[0].click();
+    return{ok:true,action:'system_print_choice_requested',serial:p.serial,include_invoice_attachments:p.include_invoice_attachments,requiresReadback:true,approval_requested:false};
   }
-  function dismiss(){
+  async function dismiss(){
     const intent=binding(),dialogs=[...document.querySelectorAll('.ui-dialog')].filter(visible);
     if(intent.phase!=='print_open_requested'||dialogs.length!==1||!/^提示信息\s*Close\s*该报销单正在审核中，请审核完成后打印\s*确认$/.test(dialogs[0].innerText.trim()))throw Error('SYSTEM_PRINT_KNOWN_REJECTION_REQUIRED');
     const buttons=[...dialogs[0].querySelectorAll('button')].filter(b=>visible(b)&&!b.disabled&&b.innerText.trim()==='确认');
     if(buttons.length!==1)throw Error('SYSTEM_PRINT_REJECTION_BUTTON_REQUIRED');
     intent.phase='rejected_wait_approval';buttons[0].click();
+    const deadline=Date.now()+10000;
+    while([...document.querySelectorAll('.ui-dialog')].some(visible)){identity();if(Date.now()>deadline)throw Error('SYSTEM_PRINT_DISMISS_PENDING');await new Promise(r=>setTimeout(r,100));}
+    if(!visible(document.getElementById('gridWF_YBX_101')))throw Error('SYSTEM_PRINT_REJECTED_LIST_REQUIRED');
+    delete root.__ustcSystemPrintIntentV1;
     return{ok:true,action:'system_print_waiting_school_approval',serial:p.serial,print_requested:false,system_write:false};
   }
-  root.ReimbursementSystemPrint={configure,open,choose,read,dismiss,details,detailContinue,detailReturn,exportMenu,exportExecute};
+  root.ReimbursementSystemPrint={configure,open,choose,read,status,dismiss,details,detailContinue,detailReturn,exportMenu,exportExecute};
 })(globalThis);

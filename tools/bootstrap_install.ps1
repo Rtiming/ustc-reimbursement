@@ -11,7 +11,7 @@ $toolRoot = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $toolRoot
 & (Join-Path $PSScriptRoot 'bootstrap_boundary.ps1') -ToolRoot $toolRoot
 if ($args -contains '--help' -or $args -contains '-h') {
-    Write-Output '用法：install.cmd [--config 文件.json] [--data-dir 绝对目录] [--profile-id ID] [--title 名称] [--mode 场景] [--with-ocr] [--check] [--plan]'
+    Write-Output '用法：install.cmd [--config 文件.json] [--data-dir 绝对目录] [--profile-id ID] [--title 名称] [--mode 场景] [--review-workspace 工作台绝对路径] [--with-ocr] [--check] [--plan]'
     Write-Output '--plan只读预览，需已有Python3.11+或已安装环境；--check只检查现有安装，均不下载。'
     exit 0
 }
@@ -31,6 +31,13 @@ if ($args -contains '--check' -or $args -contains '--plan') {
 }
 $cpu = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
 $platform = switch ($cpu) { 'ARM64' { 'windows-arm64' } 'AMD64' { 'windows-x86_64' } default { throw '仅支持Windows x64/ARM64' } }
+if (Test-Path -LiteralPath (Join-Path $toolRoot 'offline')) {
+    $offlinePython = & (Join-Path $toolRoot 'tools\offline_bootstrap.ps1') -ToolRoot $toolRoot -Platform $platform
+    foreach ($key in @('PYTHONPATH','PYTHONHOME','VIRTUAL_ENV','UV_CONFIG_FILE','UV_PYTHON')) { Remove-Item "Env:$key" -ErrorAction SilentlyContinue }
+    Write-Host 'Installing from verified offline files. No downloads are needed.'
+    & $offlinePython -B -X utf8 -I (Join-Path $toolRoot 'tools\portable_install.py') @args
+    exit $LASTEXITCODE
+}
 $rows = @(Import-Csv -LiteralPath (Join-Path $toolRoot 'distribution\bootstrap.tsv') -Delimiter "`t" | Where-Object { $_.platform -eq $platform })
 if ($rows.Count -ne 1) { throw '冻结的安装工具记录不唯一' }
 $row = $rows[0]

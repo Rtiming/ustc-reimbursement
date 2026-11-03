@@ -3,5 +3,6 @@
   "profile_id": "my_project",
   "title": "我的报销项目",
   "mode": "student_activity",
-  "with_ocr": false
+  "with_ocr": false,
+  "review_workspaces": []
 }

@@ -15,13 +15,13 @@ DEPLOYMENT_SCHEMA = 'ustc-deployment-v1'
 def deployment_options(path=None, **overrides):
     """部署声明仅接收已有安装参数，不接收命令、环境或凭据。"""
     value = {}
-    keys = {'data_dir', 'profile_id', 'title', 'mode', 'with_ocr'}
+    keys = {'data_dir', 'profile_id', 'title', 'mode', 'with_ocr', 'review_workspaces'}
     if path is not None:
         value = json.loads(Path(path).read_text(encoding='utf-8-sig'))
         if not isinstance(value, dict) or value.get('schema') != DEPLOYMENT_SCHEMA:
             raise ValueError('部署配置须使用ustc-deployment-v1对象')
         if set(value) - keys - {'schema'}:
-            raise ValueError('部署配置包含不支持的字段；仅允许资料目录、专项、场景及OCR开关')
+            raise ValueError('部署配置包含不支持的字段；仅允许资料目录、专项、场景、OCR开关及已有工作台')
         value = {k: v for k, v in value.items() if k != 'schema'}
     for key, item in overrides.items():
         if key not in keys:
@@ -42,7 +42,22 @@ def deployment_options(path=None, **overrides):
         raise ValueError('部署配置with_ocr须为布尔值')
     if any(key in value and not isinstance(value[key], str) for key in ('profile_id', 'title', 'mode')):
         raise ValueError('部署配置专项与材料场景须为字符串')
+    if 'review_workspaces' in value:
+        validate_review_paths(value['review_workspaces'])
     return value
+
+
+def validate_review_paths(paths, material_root=None):
+    if not isinstance(paths, list) or len(paths) > 100 or any(
+        not isinstance(path, str) or not Path(path).is_absolute() for path in paths
+    ):
+        raise ValueError('review_workspaces须为最多100个已有工作台绝对路径的列表')
+    resolved = [str(Path(path).resolve()) for path in paths]
+    if len(set(resolved)) != len(resolved):
+        raise ValueError('review_workspaces不能重复登记同一个目录')
+    if material_root and any(not Path(path).is_relative_to(Path(material_root).resolve()) for path in resolved):
+        raise ValueError('工作台须在本次明确配置的data_dir范围内')
+    return resolved
 
 
 def validate_installation_fields(value):
@@ -119,7 +134,18 @@ def standards_library(root):
     return Path(root).resolve() / '规范库'
 
 
-def installation_config(root, data_dir=None, profile_id=None, title=None, mode=None):
+def material_rules_path(root):
+    """私有材料规则与代码分开保存；公开空模板保持可核验、不因配置而改源码。"""
+    root=Path(root).resolve()
+    saved=read_installation(root)
+    if saved:
+        from material_intake import reject_links
+        path=Path(saved['library_root'])/'material_rules.json';reject_links(path)
+        if path.is_file():return path
+    return root/'data/material_rules.json'
+
+
+def installation_config(root, data_dir=None, profile_id=None, title=None, mode=None, review_workspaces=None):
     root = Path(root).resolve()
     old = read_installation(root)
     data = (
@@ -142,6 +168,9 @@ def installation_config(root, data_dir=None, profile_id=None, title=None, mode=N
         'profile_id': profile_id if profile_id is not None else (old or {}).get('profile_id', 'my_project'),
         'title': title if title is not None else (old or {}).get('title', '我的报销项目'),
         'mode': selected_mode,
+        'review_workspaces': validate_review_paths(
+            review_workspaces if review_workspaces is not None else (old or {}).get('review_workspaces', []), data
+        ),
     }
     validate_installation_fields(config)
     if old and 'deployed_source' in old:

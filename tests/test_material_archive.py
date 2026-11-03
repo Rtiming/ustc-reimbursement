@@ -68,6 +68,21 @@ class ArchiveAdapterTests(unittest.TestCase):
                 with self.assertRaises(FileExistsError):
                     core.stable_copy(source, target)
 
+    def test_python310_adapter_hashes_multiple_chunks_without_changing_frozen_core(self):
+        import material_archive
+        vendor=material_archive.ROOT/'distribution/vendor/archive_file.py'
+        before=vendor.read_bytes()
+        with tempfile.TemporaryDirectory() as temp,patch.object(hashlib,'file_digest',None,create=True):
+            root=Path(temp).resolve();source=root/'原件.bin';target=root/'归档.bin'
+            data=bytes(range(256))*8193
+            source.write_bytes(data)
+            core=archive_core()
+            self.assertEqual(core.stable_copy(source,target),hashlib.sha256(data).hexdigest())
+            self.assertEqual(target.read_bytes(),data)
+            with self.assertRaises(FileExistsError):core.stable_copy(source,target)
+        self.assertEqual(vendor.read_bytes(),before)
+        self.assertEqual(hashlib.sha256(before).hexdigest(),material_archive.VENDOR_SHA256)
+
     @unittest.skipUnless(os.name == 'nt', 'Windows原生拒绝改写由Windows CI执行')
     def test_windows_source_remains_write_locked_during_copy(self):
         import material_archive

@@ -11,7 +11,7 @@ for REIMBURSE_ARG in "$@"; do
         --check) REIMBURSE_CHECK_ONLY=1 ;;
         --plan) REIMBURSE_PLAN_ONLY=1 ;;
         --help|-h)
-            printf '%s\n' '用法：install.sh [--config 文件.json] [--data-dir 绝对目录] [--profile-id ID] [--title 名称] [--mode 场景] [--with-ocr] [--check] [--plan]' \
+            printf '%s\n' '用法：install.sh [--config 文件.json] [--data-dir 绝对目录] [--profile-id ID] [--title 名称] [--mode 场景] [--review-workspace 工作台绝对路径] [--with-ocr] [--check] [--plan]' \
                 '--plan只读预览，需已有Python3.11+或已安装环境；--check只检查现有安装，均不下载。'
             exit 0 ;;
     esac

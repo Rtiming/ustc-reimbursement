@@ -91,7 +91,12 @@ class AuthSocketServer:
         self.socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.socket.bind(self.name)
         os.chmod(self.name, 0o600)
-        self.socket.listen(1)
+        # A client rejects an unexpected host PID before sending a frame. On
+        # Darwin the closed connection may still occupy the accept queue; a
+        # backlog of one can refuse the next valid client before accept drains
+        # it. Queue connections, while retaining serial, identity-checked
+        # dispatch and never retrying a credential request after transmission.
+        self.socket.listen(16)
         self.socket.settimeout(.2)
         self.stop = threading.Event()
         self.callback = callback

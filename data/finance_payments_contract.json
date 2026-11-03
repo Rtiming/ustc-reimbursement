@@ -1,0 +1,15 @@
+{
+  "schema": "ustc-payments-http-contract-v1",
+  "definition_sha256": "21cb3ac114cebb741c73b5e665ec1bd3aca5f35d11bd6cbbe88968840d4ce530",
+  "winno": "13",
+  "save_button": "971313E355804EAC9AAD9D1C92355936",
+  "supported_modes": [
+    "bank_transfer",
+    "corporate_transfer_existing_or_single_new_identity",
+    "corporate_card_one_new_or_existing_transaction"
+  ],
+  "native_source": "school W13, form.textselect, _3splitCardUnit, checkbankdtl_bxddr and chekbankdtl_byjson; checked 2026-10-28",
+  "write_route": "stage/payments",
+  "corporate_limits": "preserve existing complete identities; one new identity only into blank corporate rows, uniquely resolved native bank directory and native taxpayer field procedure; independent complete payment readback",
+  "card_limits": "one exact existing or currently unbound transaction; new selection requires zero previous card binding, available remaining amount, fixed native save, complete post-binding and final independent payment readback"
+}

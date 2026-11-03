@@ -22,7 +22,7 @@ def stamp():
 def write_json(path, obj):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(obj, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    path.write_text(json.dumps(obj, ensure_ascii=False, indent=2) + '\n', encoding='utf-8', newline='\n')
 
 
 def bundle(path):
@@ -33,9 +33,29 @@ def bundle(path):
     paths = {key: (path.parent / b[key]).resolve() for key in ['case', 'form', 'invoices', 'state']}
     return b, paths
 
+def unresolved_business_corrections(case):
+    decisions=case.get('decisions',[])
+    if not isinstance(decisions,list):decisions=[decisions]
+    return[d for d in decisions if isinstance(d,dict)and d.get('status')=='requires_business_correction']
 
-def check(path, hashes=False, validation_stage=None):
-    if validation_stage not in [None, 'basic', 'funding']: raise ValueError('未知分阶段校验')
+
+def active_claim_holds(case):
+    """用户按整单暂缓的安排独立于技术错误，不能靠删票或读回通过解除。"""
+    decisions=case.get('decisions',[])
+    if not isinstance(decisions,list):decisions=[decisions]
+    return[d for d in decisions if isinstance(d,dict)and d.get('status')=='held_by_user']
+
+
+def claim_hold_blocks(request,case):
+    if not request.get('execute')or not active_claim_holds(case):return False
+    operation=request.get('operation');action=request.get('parameters',{}).get('action')
+    if operation=='invoice'and action=='draft-cancel':return False
+    if operation=='access':return isinstance(action,str)and action.startswith('remuneration-')
+    return operation in {'stage','invoice','correction','submission','invoice_selection','invoice_retry','invoice_edit','expense_amount','pdf_export','print_batch'}
+
+
+def check(path, hashes=False, validation_stage=None, rules_path=None):
+    if validation_stage not in [None, 'basic', 'categories', 'funding', 'expenses', 'payments', 'notes', 'pre-review']: raise ValueError('未知分阶段校验')
     b, paths = bundle(path)
     errors = []
     records = {}
@@ -47,6 +67,11 @@ def check(path, hashes=False, validation_stage=None):
     for key, record in records.items():
         if record.get('case_id') != b['case_id']:
             errors.append({'field': key + '.case_id', 'error': '不同案件的资料不能混用'})
+    # 完整就绪检查须报错；纠正阶段仍需允许保存字段，流程发起由原owner单独拦截。
+    if validation_stage is None and unresolved_business_corrections(records.get('case',{})):
+        errors.append({'field':'case.decisions','error':'用户已指出分单或业务范围错误，尚待纠正；保存回读不等于本案完成'})
+    if active_claim_holds(records.get('case',{})):
+        errors.append({'field':'case.decisions','error':'用户已要求问题材料所在整单暂缓；不得剔除问题费用后继续建单、填写或提交，须先核实问题材料已解决并按本案办理安排恢复'})
     c = records.get('form', {})
     serial = c.get('serial')
     for key in ['case', 'invoices', 'state']:
@@ -63,14 +88,37 @@ def check(path, hashes=False, validation_stage=None):
     materials = None
     if records.get('case'):
         try:
-            materials = audit(records['case'], json.loads((ROOT / 'data/material_rules.json').read_text(encoding='utf-8')))
+            if c.get('system_mode')=='remuneration':
+                from finance_remuneration_save import audit_material_sources
+                materials=audit_material_sources(records['case'],c)
+            else:
+                from workspace_config import material_rules_path
+                materials = audit(records['case'], json.loads((Path(rules_path)if rules_path is not None else material_rules_path(ROOT)).read_text(encoding='utf-8')))
         except (ValueError, KeyError, TypeError) as exc:
             errors.append({'field': 'case.material_context', 'error': str(exc)})
     rows = records.get('invoices', {}).get('original_files', [])
-    if not rows:
+    if c.get('system_mode')=='remuneration'and (rows or c.get('expected_invoice_count')!=0):
+        errors.append({'field':'invoices.original_files','error':'薪酬业务须按真实劳务明细，不混入普通发票'})
+    allowance=False
+    if records.get('invoices',{}).get('native_allowance_source'):
+        try:
+            from finance_allowance import valid_binding
+            allowance=valid_binding(records['invoices'],c)
+        except (OSError,ValueError,KeyError,TypeError)as exc:
+            errors.append({'field':'invoices.native_allowance_source','error':str(exc)})
+    if not rows and c.get('system_mode')!='remuneration'and not allowance:
         errors.append({'field': 'invoices.original_files', 'error': '尚未登记一票一文件的原件路径和SHA256'})
     count = c.get('expected_invoice_count')
-    if count is not None and count != len(rows):
+    native_receipts=records.get('invoices',{}).get('native_nonvat_entries',[])
+    manifest=records.get('invoices',{})
+    if manifest.get('native_domestic_allowance_source'):
+        try:
+            from finance_domestic_allowance import funding_context
+            funding_context(manifest,c)
+        except (OSError,ValueError,KeyError,TypeError)as exc:
+            errors.append({'field':'invoices.native_domestic_allowance_source','error':str(exc)})
+    source_count=len(native_receipts)if manifest.get('manual_nonvat_selection')else len(manifest.get('selected_invoices',[]))if manifest.get('native_selection')and not manifest.get('selection_requires_review')else len(rows)
+    if count is not None and count != source_count:
         errors.append({'field': 'form.expected_invoice_count', 'error': '原件数量不一致'})
     verified = 0
     if hashes:
@@ -169,6 +217,8 @@ def init_case(case_id, destination, profile):
                'state.json': {'case_id': case_id, 'serial': None, 'status': 'intake', 'completed': [], 'pending': ['collect_inputs'], 'updated_at_utc': stamp()},
                'operator.json': {'bundle_version': 1, 'case_id': case_id, 'case': 'case.json', 'form': 'form.json', 'invoices': 'invoices.json', 'state': 'state.json'}}
     destination.mkdir(parents=True)
+    from platform_runtime import private_path
+    private_path(destination)
     for name, record in records.items():
         write_json(destination/name, record)
     (destination/'receipts').mkdir()

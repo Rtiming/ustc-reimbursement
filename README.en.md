@@ -1,10 +1,16 @@
 # USTC Reimbursement Toolkit
 
+[中文](README.md)
+
+A local USTC reimbursement workbench shared by people and AI agents. Import and review materials, connect payment and itinerary evidence, split reviewed invoices into local cases, continue form preparation, handle missing items, and export Excel checklists and A4 attachments. The desktop UI, compact MCP tools and CLI share the same cases, confirmations and recovery records.
+
+The Windows offline bundle includes a pinned Python runtime and dependencies. Extract it and launch the included installer. School login, SMS verification and real financial acceptance remain separate, on the user’s own computer.
+
 [English](README.en.md) | [中文](README.md)
 
 A local reimbursement assistant for people and AI agents: document intake and archiving, PDF/OCR, sourced policy profiles, CLI/JSON, and stdio MCP. The browser adapter targets the University of Science and Technology of China (USTC). This is an independent project, not an official university service.
 
-This is **0.5.0-beta.2**, a prerelease for isolated installation, document handling and interface evaluation. See the [bilingual release notes](docs/releases/v0.5.0-beta.2.md). **The real Windows finance workflow has not been tested.** Live approval, portal exports and the five-minute batch target are not certified. Existing 0.4 installations do not receive these security fixes automatically.
+This is **0.6.0-beta.1**, a prerelease for isolated installation, document handling and interface evaluation. See the [bilingual release notes](docs/releases/v0.6.0-beta.1.md). **The real Windows finance workflow has not been tested.** Live approval, portal exports and the five-minute batch target are not certified. Existing 0.4 installations do not receive these security fixes automatically.
 
 ## Install
 
@@ -16,7 +22,7 @@ Published packages are under [Releases](https://github.com/Rtiming/ustc-reimburs
 | macOS | `sh install.sh` or the included `.command` launcher | `sh install.sh --check` |
 | Linux | `sh install.sh` | `sh install.sh --check` |
 
-The installer downloads a pinned, project-local Python and locked dependencies. It does not change global Python, PATH, or AI client configuration. The first installation needs internet access. OCR models are optional: add `--with-ocr` explicitly.
+The installer downloads a pinned, project-local Python and locked dependencies. It does not change global Python, PATH, or AI client configuration. The source package needs internet access for its first installation; the Windows full offline bundle includes these dependencies. OCR models are optional: add `--with-ocr` explicitly.
 
 ```sh
 sh install.sh --data-dir "/absolute/path/reimbursement data" --profile-id project_alpha --title "Project Alpha" --mode student_activity
