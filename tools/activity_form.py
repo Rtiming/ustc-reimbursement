@@ -4,7 +4,7 @@ import re
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
-from xml.dom import minidom
+from safe_xml import parse_dom, read_zip_member
 from zipfile import ZipFile
 from operator_support import ROOT, stamp, write_json
 from validate_config import money
@@ -292,7 +292,7 @@ def build(values, output, allow_incomplete=False):
     digest = hashlib.sha256(TEMPLATE.read_bytes()).hexdigest()
     if digest != registry['templates'][0]['converted_docx_sha256']: raise ValueError('模板SHA变化，不能继续按旧字段映射填写')
     with ZipFile(TEMPLATE) as z:
-        doc = minidom.parseString(z.read('word/document.xml'))
+        doc = parse_dom(read_zip_member(z, 'word/document.xml'))
         table = doc.getElementsByTagName('w:tbl')[0]
         rows = children(table, 'w:tr')
         cells = [children(row, 'w:tc') for row in rows]

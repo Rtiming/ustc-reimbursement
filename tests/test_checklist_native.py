@@ -11,7 +11,7 @@ from checklist_native import render,cell_value
 
 class NativeChecklistTests(unittest.TestCase):
     def setUp(self):
-        temp=tempfile.TemporaryDirectory();self.addCleanup(temp.cleanup);self.root=Path(temp.name)
+        temp=tempfile.TemporaryDirectory();self.addCleanup(temp.cleanup);self.root=Path(temp.name).resolve()
         source=self.root/'原来源.txt';source.write_text('synthetic frozen source',encoding='utf-8');self.source=source
         self.plan={'schema':'ustc-checklist-delivery-v1','case_id':'fixture','system_write':False,
             'sources':[{'path':str(source),'sha256':hashlib.sha256(source.read_bytes()).hexdigest()}],

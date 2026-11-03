@@ -53,6 +53,7 @@ class PageRecoveryTests(unittest.TestCase):
             'last_case_id': 'one',
             'tab_id': '7',
             'window_id': '8',
+            'namespace': 'namespace',
         }
         atomic_json(self.session.state_path, self.session.state)
         self.inventory = {

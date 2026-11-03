@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import re
+import uuid
 import time
 from pathlib import Path
 
@@ -142,7 +144,7 @@ class RegisteredSession(RegisteredPageOwner):
 
     def recover_frozen(self, allow_access=False):
         """迁移原文档保持原任务；不刷新页面，不重放未确认的金融动作。"""
-        from native_finance_bridge import inventory, relocate_finance_tab
+        from registered_bridge import inventory, relocate_finance_tab
         from registered_inputs import assert_definition_current
         assert_definition_current(self.service, self.cfg)
 
@@ -182,10 +184,17 @@ class RegisteredSession(RegisteredPageOwner):
             'requested_at_ns': time.time_ns(),
         }
         atomic_json(pending, intent)
+        selection = {}
+        if hits[0].get('active') is False:
+            windows = [w for w in observed.get('windows', []) if w.get('window_id') == state['window_id']]
+            if len(windows) != 1 or not windows[0].get('active_tab_id'):
+                raise APIError('registered_active_tab_unknown', '无法核定原窗口当前选中的页面，请重新盘点')
+            selection['expected_active_tab_id'] = str(windows[0]['active_tab_id'])
         result = relocate_finance_tab(
             state['tab_id'],
             tab_id_namespace=observed['tab_id_namespace'],
             expected_window_id=state['window_id'],
+            **selection,
         )
         receipt = self.folder / ('page-relocation-' + str(intent['requested_at_ns']) + '.json')
         atomic_json(receipt, {**intent, 'result': result})

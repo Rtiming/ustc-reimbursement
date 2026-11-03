@@ -7,7 +7,7 @@ import json
 import posixpath
 import zipfile
 from pathlib import Path
-from xml.etree import ElementTree as ET
+import safe_xml as ET
 
 NS = {'s': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
 REL = '{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id'
@@ -34,7 +34,7 @@ def column_name(number):
 def xml_member(z, name):
     if z.getinfo(name).file_size > 64 * 1024 * 1024:
         raise ValueError('表格XML超过64MB，需限定或分拆来源')
-    return ET.fromstring(z.read(name))
+    return ET.from_zip(z, name)
 
 
 def sheets(path):

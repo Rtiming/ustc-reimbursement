@@ -18,7 +18,7 @@ class StandardsImportTests(unittest.TestCase):
     def setUp(self):
         t = tempfile.TemporaryDirectory()
         self.addCleanup(t.cleanup)
-        self.root = Path(t.name)
+        self.root = Path(t.name).resolve()
         self.data = self.root / "private-data"
         self.data.mkdir()
         self.library = self.data / "规范库"

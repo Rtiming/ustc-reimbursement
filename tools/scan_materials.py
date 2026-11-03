@@ -14,7 +14,7 @@ import time
 import unicodedata
 import zipfile
 from pathlib import Path
-from xml.etree import ElementTree
+import safe_xml as ElementTree
 
 VERSION = '0.2.0'
 SUPPORTED = {'.pdf','.ofd','.png','.jpg','.jpeg','.tif','.tiff','.webp'}
@@ -89,7 +89,7 @@ def extract_ofd(path):
         for i,name in enumerate(names,1):
             info=z.getinfo(name)
             if info.file_size>10*1024*1024:raise RuntimeError('OFD XML异常大，留待复核')
-            node=ElementTree.fromstring(z.read(name))
+            node=ElementTree.from_zip(z, name)
             text='\n'.join((x.text or '') for x in node.iter() if x.tag.rsplit('}',1)[-1]=='TextCode')
             pages.append({'page':i,'method':'ofd_text' if text.strip() else 'unreadable','text':text,'mean_confidence':None})
     return pages

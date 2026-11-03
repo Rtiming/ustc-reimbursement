@@ -20,7 +20,7 @@ class WindowsDeliveryTests(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
-        self.base = Path(temp.name)
+        self.base = Path(temp.name).resolve()
         self.archive = self.base / "source.zip"
         files = {"README.md": b"synthetic source", "data/distribution.json": encoded({"version": "1.0.0-beta.1"})}
         files.update({name: b"example==0.1\n" for name in LOCKS})

@@ -16,7 +16,7 @@ class OfflineRuntimeTests(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
-        self.root = Path(temp.name)
+        self.root = Path(temp.name).resolve()
         self.offline = self.root / "offline"
         self.files = []
         for name, raw in [

@@ -1,5 +1,9 @@
 """历史Mac导入入口；原生工作页实现统一维护在native_finance_bridge。"""
 import sys
+import argparse
+import json
+from pathlib import Path
+import re
 
 import windows_edge_bridge as queue_bridge
 from platform_runtime import is_private_path

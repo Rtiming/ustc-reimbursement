@@ -20,7 +20,7 @@ class CaseMaterialsTests(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
-        self.root = Path(temp.name)
+        self.root = Path(temp.name).resolve()
         self.materials = self.root / "private materials"
         self.materials.mkdir()
         self.s = AssistantService(self.root, [self.materials])

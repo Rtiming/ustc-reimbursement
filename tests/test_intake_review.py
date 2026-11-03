@@ -14,7 +14,7 @@ from case_invoice_sources import CANDIDATE_STATUS, build_manifest
 
 class IntakeReviewTests(unittest.TestCase):
     def setUp(self):
-        temp=tempfile.TemporaryDirectory();self.addCleanup(temp.cleanup);self.root=Path(temp.name)
+        temp=tempfile.TemporaryDirectory();self.addCleanup(temp.cleanup);self.root=Path(temp.name).resolve()
         self.material=self.root/'materials';self.material.mkdir()
         import fitz
         self.pdf=self.material/'synthetic invoice.pdf'

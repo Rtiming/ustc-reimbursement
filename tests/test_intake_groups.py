@@ -13,7 +13,7 @@ from material_intake_service import configure_bundled_archive
 
 class IntakeGroupsTests(unittest.TestCase):
     def setUp(self):
-        temp=tempfile.TemporaryDirectory();self.addCleanup(temp.cleanup);self.root=Path(temp.name)
+        temp=tempfile.TemporaryDirectory();self.addCleanup(temp.cleanup);self.root=Path(temp.name).resolve()
         self.service=AssistantService(self.root,[self.root]);self.case='incoming';self.service.new_case(self.case)
         archive=self.root/'two activities.zip'
         import fitz

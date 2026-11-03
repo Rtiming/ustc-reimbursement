@@ -2,6 +2,8 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+import json
+from unittest.mock import patch
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'tools'))
@@ -10,7 +12,11 @@ from assistant_api import AssistantService
 class MaterialRequirementsTests(unittest.TestCase):
     def setUp(self):
         temp=tempfile.TemporaryDirectory();self.addCleanup(temp.cleanup);self.root=Path(temp.name)
+        rules=self.root/'synthetic_rules.json'
+        rules.write_text(json.dumps({'rules':[{'id':'invoice','profiles':['*'],'basis':'synthetic rule','instruction':'synthetic missing material','role':'invoice','level':'required'},{'id':'hotel','profiles':['*'],'basis':'synthetic rule','instruction':'synthetic missing material','role':'hotel_details','level':'required','when_all':{'has_hotel':True}}]}))
+        guard=patch('workspace_config.material_rules_path',return_value=rules);guard.start();self.addCleanup(guard.stop)
         self.service=AssistantService(self.root,[self.root]);self.service.new_case('fixture')
+        self.service.update_case('fixture','case',{'material_context':{'profiles':['synthetic']}},self.service.revision('fixture'))
 
     def test_acknowledgement_preserves_every_gap_and_invalidates_after_input_change(self):
         before=self.service.material_requirements('fixture')

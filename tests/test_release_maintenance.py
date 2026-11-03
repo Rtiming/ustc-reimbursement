@@ -19,7 +19,7 @@ class MaintenanceTests(unittest.TestCase):
     def setUp(self):
         t = tempfile.TemporaryDirectory()
         self.addCleanup(t.cleanup)
-        self.base = Path(t.name)
+        self.base = Path(t.name).resolve()
         old = self.base / "old.zip"
         old.write_bytes(package("1.0.0-beta.1"))
         self.root = extract_verified(old, self.base / "installed", "1.0.0-beta.1")

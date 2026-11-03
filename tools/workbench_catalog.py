@@ -4,7 +4,7 @@ import copy
 import json
 
 GROUPS = {
-    'activities': ('活动与批次', ['cases','overview','new_case','case_details','case_journey','update_case','check','batch_plan','prepare_batch','prepare_batch_file']),
+    'activities': ('活动与批次', ['register_workflow','workflow','cases','overview','new_case','case_details','case_journey','update_case','check','batch_plan','prepare_batch','prepare_batch_file']),
     'materials': ('导入与核对', ['material_intake','intake_review','scan','ocr_status','material_ocr','material_ocr_resume','verify_invoice','search_spreadsheets','read_taxi_itineraries','audit_invoice_fields','record_invoice_verification']),
     'review': ('补件与反馈', ['case_materials','material_review','material_requirements','intake_groups','receive_materials']),
     'finance': ('财务办理', ['case_finance','business','invoice_verification','invoice_sources','invoice_selection','invoice','stage','expense_amount','invoice_edit','set_explanation']),
@@ -13,9 +13,10 @@ GROUPS = {
     'recovery': ('退回与恢复', ['correction','invoice_retry','read_system','record_result','result','task_view','pdf_export_inspect']),
     'rules': ('规范与专项', ['standards_read','standards_init','standards_add_profile','standards_change','standards_select','standards_import']),
     'delivery': ('清单与交付', ['case_delivery','pdf_export','print_batch','activity','render','ledger_query','ledger_trace']),
-    'settings': ('连接与帮助', ['finance_connection','capabilities','guide','tabs','access','assist']),
+    'settings': ('连接与帮助', ['bridge','finance_connection','capabilities','guide','tabs','access','assist']),
 }
 TITLES = {
+    'register_workflow':'登记已有办理流程','workflow':'接续已登记流程','bridge':'设置本机财务连接',
     'standards_import':'导入已核私人规范包',
     'case_materials':'本活动材料、费用与补件',
     'case_delivery':'本活动交付与系统PDF',

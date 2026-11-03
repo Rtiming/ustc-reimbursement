@@ -9,7 +9,7 @@ import posixpath
 import re
 import tempfile
 import zipfile
-import xml.etree.ElementTree as ET
+import safe_xml as ET
 
 DATE_TEXT = re.compile(r'^\d{4}-\d{2}-\d{2}(?:[T ][0-9:.]+(?:Z|[+-]\d{2}:?\d{2})?)?$')
 SS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
@@ -29,7 +29,7 @@ def restore_text_dates(workbook, plan):
         raise ValueError('不是只读清单交付计划')
     workbook = Path(workbook)
     with zipfile.ZipFile(workbook) as source:
-        contents = {item.filename: source.read(item.filename) for item in source.infolist()}
+        contents = {item.filename: ET.read_zip_member(source, item.filename) for item in source.infolist()}
         entries = source.infolist()
     wb = ET.fromstring(contents['xl/workbook.xml'])
     rels = {r.attrib['Id']: r.attrib['Target'] for r in ET.fromstring(contents['xl/_rels/workbook.xml.rels'])}

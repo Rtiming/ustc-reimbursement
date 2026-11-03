@@ -9,7 +9,7 @@ import shutil
 import sys
 import zipfile
 
-from platform_runtime import private_path
+from platform_runtime import private_path, is_private_path
 from windows_edge_bridge import ROOT, STATE, HOST_NAME, atomic_private, status
 from build_extension import RUNTIME_FILES
 
@@ -68,7 +68,7 @@ def capabilities():
             'unsupported': (['windows_material_safe_open_not_qualified'] + ([] if connected.get('auth_pipe_name') else ['windows_secure_auth_bridge_not_connected'])) if windows else []}
 
 
-def prepare():
+def _prepare_unlocked():
     STATE.mkdir(parents=True, exist_ok=True)
     private_path(STATE)
     package = STATE/'package'
@@ -115,26 +115,149 @@ def prepare():
     return record
 
 
-def install():
+def ensure_private_state():
+    if STATE.is_symlink() or STATE.absolute() != STATE.resolve():
+        raise ValueError('桥运行目录必须使用本机规范路径，不接受链接或重定向')
+    try:
+        STATE.mkdir(parents=True, exist_ok=False)
+    except FileExistsError:
+        if not STATE.is_dir() or not is_private_path(STATE):
+            raise ValueError('桥运行目录属于其他用户或权限不符；请使用独立工具目录')
+    else:
+        private_path(STATE)
+
+
+def assert_idle_state(directory):
+    directory = Path(directory)
+    if not is_private_path(directory):
+        raise ValueError('旧主机运行目录不属于当前用户隔离范围')
+    health = directory / 'status.json'
+    if health.exists():
+        if not is_private_path(health):
+            raise ValueError('旧主机状态权限不符')
+        value = json.loads(health.read_text(encoding='utf-8'))
+        if value.get('active_request_id') or value.get('rescue_request_id'):
+            raise ValueError('主机保留未完成请求，不准备、迁移或清理原现场')
+    # 历史意图/响应原样保留；不在安装器中猜测金融结果或替案例恢复清理记录。
+
+
+def prepare():
+    from contextlib import nullcontext
+    from platform_runtime import file_lock, windows_bridge_install_lock
+    guard = windows_bridge_install_lock() if os.name == 'nt' else nullcontext()
+    with guard:
+        ensure_private_state()
+        with file_lock(STATE / 'host.lock', busy_message='当前主机仍在运行，不重写已安装程序'):
+            assert_idle_state(STATE)
+            return _prepare_unlocked()
+
+
+def registration_snapshot():
+    if sys.platform != 'win32':
+        raise ValueError('仅Windows存在本机Native Messaging注册')
+    import winreg
+    rows = []
+    for location in (REGISTRY, COMPAT_REGISTRY):
+        key_exists = False
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, location) as key:
+                key_exists = True
+                current, _ = winreg.QueryValueEx(key, '')
+        except FileNotFoundError:
+            current = None
+        row = {'key': location, 'key_exists': key_exists, 'manifest': current}
+        if current:
+            path = Path(current)
+            if not path.is_absolute() or path.name != 'native-host.json' or path.parent.name != 'edge-bridge' or path.parent.parent.name != '.local':
+                raise ValueError('已有主机登记不属于本工具目录结构，不读取或覆盖')
+            if path.is_symlink() or path.absolute() != path.resolve() or not path.is_file() or path.stat().st_size > 16384:
+                raise ValueError('已有主机清单缺失、过大或是链接，先核对原接线')
+            raw = path.read_bytes()
+            value = json.loads(raw)
+            if (value.get('name') != HOST_NAME or value.get('type') != 'stdio'
+                    or Path(value.get('path', '')).resolve() != (path.parent / 'native-host.cmd').resolve()
+                    or value.get('allowed_origins') != ['chrome-extension://' + extension_id() + '/']):
+                raise ValueError('已有主机身份不同，不能迁移')
+            row['manifest_sha256'] = hashlib.sha256(raw).hexdigest()
+        rows.append(row)
+    digest = hashlib.sha256(json.dumps(rows, sort_keys=True).encode()).hexdigest()
+    return {'registrations': rows, 'registration_sha256': digest,
+            'migration_required': any(x['manifest'] and Path(x['manifest']).resolve() != (STATE/'native-host.json').resolve() for x in rows)}
+
+
+def install(expected_registration_sha256=None):
     if sys.platform != 'win32':
         raise ValueError('仅Windows安装Native Messaging；Mac继续原生桥')
-    record = prepare()
+    from platform_runtime import windows_bridge_install_lock
+    with windows_bridge_install_lock():
+        return _install_locked(expected_registration_sha256)
+
+
+def _install_locked(expected_registration_sha256=None):
+    snapshot = registration_snapshot()
+    if expected_registration_sha256 is not None and snapshot['registration_sha256'] != expected_registration_sha256:
+        raise ValueError('本机主机登记与预览不同，未覆盖')
+    if snapshot['migration_required'] and expected_registration_sha256 is None:
+        raise ValueError('已有其他位置的本项目主机；先bridge install预览，再携登记SHA迁移')
+    ensure_private_state()
     import winreg
     expected = str(STATE/'native-host.json')
     # Edge文档声明Chrome登记为兼容回退；只登记本项目同名host，不改任何浏览器策略。
-    for location in [REGISTRY, COMPAT_REGISTRY]:
+    from contextlib import ExitStack
+    from platform_runtime import file_lock
+    with ExitStack() as locks:
+        locks.enter_context(file_lock(STATE / 'host.lock', busy_message='当前主机仍在运行，不重写已安装程序'))
+        assert_idle_state(STATE)
+        for old in {x['manifest'] for x in snapshot['registrations'] if x['manifest']}:
+            directory = Path(old).parent
+            if directory.resolve() == STATE.resolve():
+                continue
+            locks.enter_context(file_lock(directory / 'host.lock', busy_message='旧主机仍在运行，保留原连接，不迁移'))
+            assert_idle_state(directory)
+        if registration_snapshot()['registration_sha256'] != snapshot['registration_sha256']:
+            raise ValueError('迁移前注册表或原清单发生变化，未覆盖')
+        record = _prepare_unlocked()
+        if snapshot['migration_required']:
+            atomic_private(STATE/'previous-registration.json', snapshot)
+        changed = []
         try:
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, location) as key:
-                current, _ = winreg.QueryValueEx(key, '')
-            if Path(current).resolve() != Path(expected).resolve():
-                raise ValueError('已有其他位置的本项目主机登记；保留现状，先核对单一代码owner')
-        except FileNotFoundError:
-            pass
-    for location in [REGISTRY, COMPAT_REGISTRY]:
-        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, location) as key:
-            winreg.SetValueEx(key, '', 0, winreg.REG_SZ, expected)
+            for location in [REGISTRY, COMPAT_REGISTRY]:
+                changed.append(location)
+                with winreg.CreateKey(winreg.HKEY_CURRENT_USER, location) as key:
+                    winreg.SetValueEx(key, '', 0, winreg.REG_SZ, expected)
+            after = registration_snapshot()
+            if any(x['manifest'] != expected for x in after['registrations']):
+                raise ValueError('新主机登记独立回读不一致')
+        except Exception:
+            # 仅恢复仍指向本次新主机的键；其他进程改过的值不覆盖。
+            for location in changed:
+                original_row = next(x for x in snapshot['registrations'] if x['key'] == location)
+                try:
+                    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, location) as key:
+                        value, _ = winreg.QueryValueEx(key, '')
+                except FileNotFoundError:
+                    if not original_row['key_exists']:
+                        try:
+                            winreg.DeleteKey(winreg.HKEY_CURRENT_USER, location)
+                        except FileNotFoundError:
+                            pass
+                    continue
+                if value != expected:
+                    continue
+                original = original_row['manifest']
+                if original is None:
+                    if original_row['key_exists']:
+                        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, location) as key:
+                            winreg.DeleteValue(key, '')
+                    else:
+                        winreg.DeleteKey(winreg.HKEY_CURRENT_USER, location)
+                else:
+                    with winreg.CreateKey(winreg.HKEY_CURRENT_USER, location) as key:
+                        winreg.SetValueEx(key, '', 0, winreg.REG_SZ, original)
+            raise
     return {**record, 'host_registered': True, 'registration_scope': 'current_user',
-            'registration_keys': [REGISTRY, COMPAT_REGISTRY], 'extension_loaded': False}
+            'registration_keys': [REGISTRY, COMPAT_REGISTRY], 'extension_loaded': False,
+            'registration_migrated': snapshot['migration_required']}
 
 
 def main():

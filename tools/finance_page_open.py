@@ -60,7 +60,7 @@ end timeout'''.replace('ORIGINAL_WINDOW',json.dumps(str(window_id))).replace('OR
 
 
 def open_page(case_id, request_id, old_tab_id, output, receipt=None, wait=5, silent=True, separate_window=False):
-    from finance_session import SESSIONS, ENTRY, EDGE_BUNDLE, native_inventory, background_tab_script, restore_foreground
+    from finance_session import SESSIONS, ENTRY, EDGE_BUNDLE, native_inventory, background_tab_script, restore_foreground, foreground_comparison
     from finance_backend import mac_native_enabled, bound_native_enabled
     if mac_native_enabled() or (sys.platform == 'win32' and separate_window and bound_native_enabled()):
         return open_native_page(case_id,request_id,old_tab_id,output,receipt,wait=wait,

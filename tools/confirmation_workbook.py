@@ -8,7 +8,7 @@ import zipfile
 from collections import Counter
 from datetime import date, datetime, timezone
 from pathlib import Path, PurePosixPath
-import xml.etree.ElementTree as ET
+import safe_xml as ET
 
 S = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
 R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
@@ -39,7 +39,7 @@ def workbook_values(path):
         if any(n.endswith('vbaProject.bin') for n in names):
             raise ValueError('不读取带宏工作簿')
         def xml(name):
-            raw = z.read(name)
+            raw = ET.read_zip_member(z, name)
             if b'<!DOCTYPE' in raw or b'<!ENTITY' in raw:
                 raise ValueError('不接受XML实体声明')
             return ET.fromstring(raw)
