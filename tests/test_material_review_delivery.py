@@ -186,6 +186,9 @@ class DeliveryTest(unittest.TestCase):
             self.assertEqual(run('start')['url'], first['url'])
             self.assertTrue(run('status')['running'])
             self.assertTrue(run('stop')['stopped'])
+            if sys.platform=='win32':
+                from platform_runtime import process_alive
+                self.assertIs(process_alive(first['pid']),False)
             self.assertFalse(run('status')['running'])
             second = run('start')
             self.assertFalse(second['reused'])
@@ -231,7 +234,8 @@ class DeliveryTest(unittest.TestCase):
             self.assertNotEqual(run('start').returncode, 0)
             self.assertFalse(json.loads(run('status').stdout)['code_current'])
         finally:
-            run('stop')
+            stopped=run('stop')
+            self.assertEqual(stopped.returncode,0,stopped.stderr)
 
     def test_pdf_pages_and_locations_are_exported(self):
         import fitz

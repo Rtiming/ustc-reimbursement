@@ -65,6 +65,7 @@ def launch_lock(record):
 
 def code_identity():
     paths = sorted((ROOT/'tools').glob('material_review_*.py'))
+    paths += [ROOT/'tools/platform_runtime.py']
     paths += sorted((ROOT/'tools'/'material_review_ui').glob('*'))
     return digest({str(p.relative_to(ROOT)):sha(p) for p in paths if p.is_file()})
 
@@ -107,9 +108,17 @@ def stop(workspace):
     with urllib.request.urlopen(req,timeout=3) as response:
         require(json.load(response).get('ok'),'工作台未确认停止')
     deadline=time.monotonic()+5
+    cleaned=False
     while time.monotonic()<deadline:
         if not live(info):
-            remove_runtime(record,info)
+            if not cleaned:
+                remove_runtime(record,info)
+                cleaned=True
+            if os.name=='nt':
+                from platform_runtime import process_alive
+                if process_alive(info.get('pid')) is not False:
+                    time.sleep(.05)
+                    continue
             return {'ok':True,'stopped':True,'running':False,'system_write':False}
         time.sleep(.1)
     raise ReviewError('停止尚未读回，请核对status；不要按旧PID强制终止其他进程')

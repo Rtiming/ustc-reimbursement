@@ -298,6 +298,7 @@ def _handoff(package, workspace, data, version, current):
     for module in modules:
         name = f'material_review_{module}.py'
         package.add('tools/'+name, (ROOT/'tools'/name).read_bytes(), role='runtime')
+    package.add('tools/platform_runtime.py', (ROOT/'tools/platform_runtime.py').read_bytes(), role='runtime')
     for path in sorted((ROOT/'tools'/'material_review_ui').iterdir()):
         if path.is_file():
             package.add('tools/material_review_ui/'+path.name, path.read_bytes(), role='runtime')
