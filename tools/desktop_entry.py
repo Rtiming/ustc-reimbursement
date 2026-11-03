@@ -51,7 +51,7 @@ def install(root, *, check_only=False, desktop_dir=None):
         return {'ok': True, 'state': 'not_windows', 'note': '本平台使用已生成的工作台启动入口'}
     root = Path(root).resolve()
     desired = expected(root)
-    if os.environ.get('GITHUB_ACTIONS') == 'true' and os.environ.get('CI') == 'true' and desktop_dir is None:
+    if os.environ.get('GITHUB_ACTIONS') == 'true' and os.environ.get('CI') == 'true' and desktop_dir is None and not (root / '.local/client-configs/desktop-shortcut.json').is_file():
         launcher = root / '.local/client-configs/打开报销工作台.cmd'
         if not launcher.is_file():
             raise ValueError('无交互桌面的验收环境缺少本地启动入口')
