@@ -86,9 +86,10 @@ class AuthProtocolTests(unittest.TestCase):
             with self.assertRaises(pipes.PipeError):pipes.call(name,os.getpid()+1,packet())
             deadline=time.monotonic()+2
             while not server.ready and time.monotonic()<deadline:time.sleep(.01)
-            value=pipes.call(name,os.getpid(),packet())
+            for _ in range(10):
+                value=pipes.call(name,os.getpid(),packet())
             self.assertEqual(value,{'ok':True,'state':'fixture_only'})
-            self.assertEqual(received,[True])
+            self.assertEqual(received,[True] * 10)
         finally:server.close()
         self.assertFalse(server.thread.is_alive())
 

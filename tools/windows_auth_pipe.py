@@ -147,10 +147,12 @@ class AuthPipeServer:
             finally:
                 if isinstance(packet,dict): packet.clear()
                 self.api.DisconnectNamedPipe(handle)
-                self.api.CloseHandle(handle);self.handle=None
             if not self.running: break
-            try: self._create()
-            except PipeError: break
+            # Keep the verified instance alive between clients; recreating its name races the next connection.
+            # https://learn.microsoft.com/en-us/windows/win32/api/namedpipeapi/nf-namedpipeapi-connectnamedpipe
+            self.private_acl = self._read_private_acl()
+            if not self.private_acl: break
+            self.ready = True
         self.ready=False
         if self.handle:
             self.api.CloseHandle(self.handle);self.handle=None
