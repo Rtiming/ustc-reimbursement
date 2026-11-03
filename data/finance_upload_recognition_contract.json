@@ -1,0 +1,12 @@
+{
+  "schema": "ustc-native-upload-recognition-contract-v1",
+  "callbacks": {
+    "invoiceHandle": "619305e1b36d6434728a3aa58b9a441812a9a5ba56a9b415cd7540cd67aab5f7",
+    "pdf_v2": "044b7c6fdf484bc5cabc00724ef7be744ff0afd99aa1e001fb211f8dda3367e7",
+    "pdfInvoice_succCallBack": "2158f23ffa1e543cfaeaddcde1c56d86adf9de0bbb1591673cccefdde8b03adf",
+    "pdfInvoice_failCallBack": "f7a09aba716ad876f7a644bc0a00aa6f085958cde51a2440c305868a1caf43f9",
+    "ocr_hh": "4066ac5230a83d1e2883407a413629b3f57eca1a059fe42cc5ca0a04e30556f5",
+    "ocr_hh_succCallBack": "bdd2bca353087a128c8f2dadf5f075b2c26e0227093ce1c667379f6a48fba43f",
+    "callInterface": "3b7db6d168e6648a8479f4d1f6218e90158fe41be273f3638f9d07c6608b3639"
+  }
+}

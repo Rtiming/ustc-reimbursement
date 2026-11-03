@@ -1,0 +1,614 @@
+{
+  "schema": "ustc-business-read-contracts-v1",
+  "domains": {
+    "basic": [
+      {
+        "winno": "43",
+        "funcno": "60",
+        "bindSql": "$c47b2aa2db30b32bf5318546e20e7343|#0-userinfo.userid#,#0-userinfo.username#,#61-serialno#"
+      }
+    ],
+    "payments": [
+      {
+        "winno": "13",
+        "funcno": "19",
+        "bindSql": "$4576fe6652a1afea8448469be152069f|#0-userinfo.userid#,#61-serialno#"
+      },
+      {
+        "winno": "13",
+        "funcno": "22",
+        "bindSql": "$25c4b254be4794016706d1d035f636e5|#0-userinfo.userid#,#61-serialno#"
+      },
+      {
+        "winno": "13",
+        "funcno": "24",
+        "bindSql": "$53624b41aecaac606d4ab22142a79d65|#0-userinfo.userid#,#61-serialno#"
+      },
+      {
+        "winno": "13",
+        "funcno": "245",
+        "bindSql": "$b6f14ca224f42bd2fd4ad17e82dd6bc7|#0-userinfo.userid#,#61-serialno#"
+      },
+      {
+        "winno": "13",
+        "funcno": "285",
+        "bindSql": "$5eae8514ad636d305ebbc71807e32f4a|#61-serialno#,#0-userinfo.userid#"
+      },
+      {
+        "winno": "13",
+        "funcno": "456",
+        "bindSql": "$21090f66caed381d2b50e136b82391e6|#61-serialno#,#0-userinfo.userid#"
+      },
+      {
+        "winno": "13",
+        "funcno": "597",
+        "bindSql": "$fa7801072a818d80b8924e22dec84569|#0-userinfo.userid#,#61-serialno#"
+      },
+      {
+        "winno": "13",
+        "funcno": "994",
+        "bindSql": "$e4c6b7d338668a3375bc2f1ffa464d03|#0-userinfo.userid#,#61-serialno#"
+      },
+      {
+        "winno": "13",
+        "funcno": "1508",
+        "bindSql": "$42766d4572ecff8383d49e8fe17b1b2f|#0-userinfo.userid#,#61-serialno#"
+      },
+      {
+        "winno": "13",
+        "funcno": "1510",
+        "bindSql": "$8a79c2591d825247f31641b23bfb4313|#0-userinfo.userid#,#61-serialno#"
+      },
+      {
+        "winno": "13",
+        "funcno": "1791",
+        "bindSql": "$7060a5c4c69b86b01599fc1b8f566d03|#0-userinfo.userid#,#61-serialno#"
+      },
+      {
+        "winno": "13",
+        "funcno": "2082",
+        "bindSql": "$b7ea5595fc5a703200e69e27e2bf37e0|#0-userinfo.userid#,#61-serialno#"
+      },
+      {
+        "winno": "13",
+        "funcno": "2212",
+        "bindSql": "$6d8442b2bdd4687647df5f15bc955efb|#0-userinfo.userid#,#61-serialno#"
+      },
+      {
+        "winno": "13",
+        "funcno": "2225",
+        "bindSql": "$a7a60389379ebefb46e3698b62d5118f|#0-userinfo.userid#,#61-serialno#"
+      }
+    ],
+    "categories": [
+      {
+        "winno": "216",
+        "funcno": "307",
+        "tablenames": "@{ybx_query_pc_package.wfp_query_moreproj_dtl:#61-serialno#;#0-userinfo.userid#}@ t",
+        "columns": [
+          "t.t_desc",
+          "t.amt",
+          "t.bu_code",
+          "t.t_id",
+          "t.uni_prj_code",
+          "t.serial_no",
+          "t.activity_name",
+          "t.bu_code_balance",
+          "t.jj_subj",
+          "t.jj_subjname",
+          "t.ord",
+          "t.s_ord"
+        ],
+        "needcount": false,
+        "treeGrid": true,
+        "wireColumns": [
+          "t.t_desc",
+          "t.amt",
+          "t.bu_code",
+          "t.t_id",
+          "t.uni_prj_code",
+          "t.serial_no",
+          "t.activity_name",
+          "t.bu_code_balance",
+          "t.jj_subj",
+          "t.jj_subjname",
+          "t.ord",
+          "t.s_ord",
+          "t.tlevel",
+          "t.tparent",
+          "t.tleaf",
+          "t.texpanded",
+          "t.tloaded"
+        ]
+      }
+    ],
+    "remuneration": [
+      {
+        "winno": "198",
+        "funcno": "280",
+        "tablenames": "@{ybx_cj_package.q_rewards:#61-serialno#;#0-userinfo.userid#}@ t",
+        "columns": [
+          "t.seq",
+          "t.unino",
+          "t.name",
+          "t.age",
+          "t.persontype",
+          "t.review_content",
+          "t.review_kind",
+          "t.ryinfo",
+          "t.hq_branchname",
+          "t.cardno_show",
+          "t.memattr",
+          "t.standard",
+          "t.pcnt",
+          "t.is_fcnt_continuous",
+          "t.punit",
+          "t.funit",
+          "t.premark",
+          "t.company",
+          "t.tech_post1",
+          "t.degree_type",
+          "t.mentor_type",
+          "t.is_activities",
+          "t.is_teacher",
+          "t.work_hours",
+          "t.consult_way",
+          "t.caculation",
+          "t.decision",
+          "t.filename",
+          "t.AMT",
+          "t.currency",
+          "t.rate",
+          "t.foreign_amt",
+          "t.tele",
+          "t.zy_collage",
+          "t.zy_culti_level",
+          "t.zy_culti_type",
+          "t.zy_subject_one",
+          "t.zy_special_plan",
+          "t.zy_teacher",
+          "t.work_stime",
+          "t.work_etime",
+          "t.tips",
+          "t.btns",
+          "t.stdamt",
+          "t.rewardtype",
+          "t.emp",
+          "t.CARDNO",
+          "t.ORD",
+          "t.pno",
+          "t.serial_no",
+          "t.personid_jm"
+        ],
+        "needcount": true,
+        "treeGrid": false,
+        "queryColumns": [
+          "t.seq",
+          "t.unino",
+          "t.name",
+          "t.age",
+          "t.persontype",
+          "t.rank_post",
+          "t.review_content",
+          "t.review_kind",
+          "t.ryinfo",
+          "t.hq_branchname",
+          "t.cardno_show",
+          "t.memattr",
+          "t.standard",
+          "t.pcnt",
+          "t.is_fcnt_continuous",
+          "t.punit",
+          "t.funit",
+          "t.premark",
+          "t.company",
+          "t.tech_post1",
+          "t.degree_type",
+          "t.mentor_type",
+          "t.is_activities",
+          "t.is_teacher",
+          "t.work_hours",
+          "t.consult_way",
+          "t.caculation",
+          "t.decision",
+          "t.filename",
+          "t.AMT",
+          "t.after_income",
+          "t.currency",
+          "t.rate",
+          "t.foreign_amt",
+          "t.tele",
+          "t.zy_collage",
+          "t.zy_culti_level",
+          "t.zy_culti_type",
+          "t.zy_subject_one",
+          "t.zy_special_plan",
+          "t.zy_teacher",
+          "t.work_stime",
+          "t.work_etime",
+          "t.is_qsgx",
+          "t.WITHHOLDING_OBLIGATION_DATE",
+          "t.INV_NO",
+          "t.tips",
+          "t.btns",
+          "t.WITHHOLDING_FLAG",
+          "t.stdamt",
+          "t.rewardtype",
+          "t.emp",
+          "t.CARDNO",
+          "t.ORD",
+          "t.pno",
+          "t.serial_no",
+          "t.personid_jm"
+        ]
+      }
+    ],
+    "invoices": [
+      {
+        "winno": "33",
+        "funcno": "53",
+        "tablenames": "(@{ybx_query_pc_package.wfp_query_bx_unapply_pool:#0-userinfo.userid#;#61-bx_jbxx_bx_type#;pc;#61-has_chosen#;#61-trip_tkguids#;#0-ty_trip_id#;#0-tk_sx_id#}@) t",
+        "columns": [
+          "t.tk_code_abst",
+          "t.tk_display_abst",
+          "t.paper_notes",
+          "t.tk_total_amt",
+          "t.auth_rst_desc",
+          "t.show_id",
+          "t.tk_salename",
+          "t.share_sname",
+          "t.share_remark",
+          "t.ca",
+          "t.tk_date",
+          "t.canedit",
+          "t.tk_src_abst",
+          "t.tk_typename",
+          "t.tk_code",
+          "t.tk_no",
+          "t.auth_date",
+          "t.tk_guid",
+          "t.tk_type",
+          "t.serial_no",
+          "t.tk_mod_flag",
+          "t.PC_Has_chosen",
+          "t.inner_ord",
+          "t.tk_mainguid",
+          "t.tk_buysno",
+          "t.need_del_dtl",
+          "t.is_offline_invoice"
+        ],
+        "needcount": true,
+        "treeGrid": false
+      }
+    ],
+    "funding": [
+      {
+        "winno": "170",
+        "funcno": "242",
+        "tablenames": "@{ybx_query_pc_package.wfp_query_singleproj_select:#61-serialno#;#0-userinfo.userid#;#61-ignore_zero#}@ t",
+        "columns": [
+          "t.cz",
+          "t.is_ky",
+          "t.uni_prj_code",
+          "t.activity_name",
+          "t.proj_type",
+          "t.cw_username",
+          "t.CHARGE_SNO",
+          "t.CHARGE_NAME",
+          "t.balance",
+          "t.grant_id",
+          "t.deadline",
+          "t.ai_flag",
+          "t.zdybz",
+          "t.sc",
+          "t.is_pub",
+          "t.sc1",
+          "t.select_flag",
+          "t.bx_amt",
+          "t.finish_date",
+          "t.forbidden",
+          "t.forbidden_rule_id_set",
+          "t.flag",
+          "t.allow_query",
+          "t.sa_depart",
+          "t.sa_depart_name"
+        ],
+        "needcount": true,
+        "treeGrid": false
+      }
+    ],
+    "submission": [
+      {
+        "winno": "76",
+        "funcno": "109",
+        "bindSql": "$3d351587e212ab30414d60145f395814|#0-USERINFO.USERID#,#61-serialno#,#61-node_id#"
+      },
+      {
+        "winno": "76",
+        "funcno": "495",
+        "bindSql": "$9cd19f173d950ef33d8890fd07085f9a|#0-USERINFO.USERID#,#61-serialno#,#61-node_id#,#61-wf_name#"
+      },
+      {
+        "winno": "76",
+        "funcno": "1816",
+        "tablenames": "(@{ybx_lc_get_checklog_by_spjm:#61-serialno#;#0-userinfo.userid#;#61-wf_name#}@) t,(@{ybx_lc_get_checklog_by_spjm:#61-serialno#;#0-userinfo.userid#}@) t",
+        "columns": [
+          "t.all_info",
+          "t.node_name",
+          "t.appinfo",
+          "t.operator",
+          "t.op_name",
+          "t.op_comment",
+          "t.op_date",
+          "t.signbase",
+          "t.node_id",
+          "t.collab_type"
+        ],
+        "needcount": true,
+        "treeGrid": false
+      },
+      {
+        "winno": "76",
+        "funcno": "2040",
+        "bindSql": "$4b27fe79c4c604a7eee5c27888fd4cc5|#61-serialno#,#0-USERINFO.USERID#"
+      }
+    ],
+    "notes": [
+      {
+        "winno": "54",
+        "funcno": "76",
+        "bindSql": "$d36715c2ec30fd4ac903112d180bd18f|#61-serialno#,#61-XTYPE#,#0-userinfo.userid#",
+        "emptyDefaults": [
+          "SPEC_CAPTION",
+          "SPEC_ABST",
+          "ZS_DATE",
+          "ZS_ENDDATE",
+          "ZS_PROVIDER",
+          "CITY_PROVIDER",
+          "CITY_DATE",
+          "CITY_PLACE",
+          "CITY_LOSE_NAME",
+          "CITY_LOSE_DATE",
+          "CITY_LOSE_PLACE",
+          "CITY_LOSE_OTHER",
+          "SELF_START_DATE",
+          "SELF_END_DATE",
+          "SELF_PLACE",
+          "STUDENT_NAME",
+          "STUDENT_NO",
+          "BUSINESS_START_DATE",
+          "BUSINESS_END_DATE",
+          "BUSINESS_PLACE",
+          "BUSINESS_CAUSE",
+          "OUTER_NAME",
+          "OUTER_UNIT",
+          "OUTER_CAUSE",
+          "SPEC_RESPONSE",
+          "SPEC_RESPONSE_SELECT",
+          "QITA",
+          "SPEC_RESPONSE_XMSELECT",
+          "SPEC_FILE",
+          "LC_APPROVER",
+          "LC_APPROVER_NAME",
+          "LC_ACCEPTER",
+          "LC_ACCEPTER_NAME",
+          "TRIP_AMOUNT",
+          "PRETICKET",
+          "TICKET_SEL",
+          "PROJ_NAME",
+          "BUDGET_AMOUNT",
+          "IS_GP_ITEM",
+          "GP_CONTRACT_NO",
+          "PROJ_BUCODE",
+          "SPEC_GUID",
+          "PROJ_BASEINFO",
+          "SPEC_TYPE"
+        ]
+      }
+    ],
+    "pre_review": [
+      {
+        "winno": "1099",
+        "funcno": "1297",
+        "bindSql": "$5a5bfdfe207a02cd1c43eafbfd4b93bb|#61-serialno#,#61-LC_PARAMS_NAME#,#0-userinfo.userid#,#61-LC_PARAMS_UUID#"
+      }
+    ],
+    "recognition": [
+      {
+        "winno": "79",
+        "funcno": "113",
+        "tablenames": "@{ybx_query_pc_package.wfp_query_invoice_under:#0-userinfo.userid#}@ t",
+        "columns": [
+          "t.show_desc",
+          "t.show_filename",
+          "t.show_date",
+          "t.show_status",
+          "t.show_err_msg",
+          "t.filesequcode",
+          "t.tk_filecode",
+          "t.show_seq",
+          "t.show_type",
+          "t.tk_mainguid"
+        ],
+        "needcount": true,
+        "treeGrid": false
+      }
+    ],
+    "used_invoices": [
+      {
+        "winno": "386",
+        "funcno": "533",
+        "tablenames": "((@{ybx_query_invoice_check:#0-userinfo.userid#;#535-t.bx_type#;已报销;#535-t.serial_no#;#535-t.start_money#;#535-t.end_money#;#535-t.tk_typename#;#535-t.tk_no#}@)) t",
+        "columns": [
+          "t.serial_no",
+          "t.tk_code_abst",
+          "t.req_sname",
+          "t.tk_display_abst",
+          "t.tk_total_amt",
+          "t.tk_salename",
+          "t.input_date",
+          "t.status_name",
+          "t.tk_guid"
+        ],
+        "needcount": true,
+        "treeGrid": false,
+        "queryColumns": [
+          "t.serial_no",
+          "t.tk_code_abst",
+          "t.req_sname",
+          "t.tk_display_abst",
+          "t.tk_total_amt",
+          "t.tk_salename",
+          "t.input_date",
+          "t.status_name",
+          "t.tk_guid"
+        ]
+      }
+    ],
+    "invoice_allocations": [
+      {
+        "winno": "276",
+        "funcno": "385",
+        "tablenames": "@{ybx_query_pc_package.wfp_query_more_tks_bcode_dtl:#61-serialno#;#0-userinfo.userid#}@ t",
+        "needcount": false,
+        "treeGrid": true,
+        "columns": [
+          "t.t_desc",
+          "t.invoice_amt",
+          "t.t_amt",
+          "t.old_amt",
+          "t.amt_sum",
+          "t.tk_guid",
+          "t.xtype",
+          "t.uni_prj_code",
+          "t.bu_code",
+          "t.t_name",
+          "t.ord"
+        ],
+        "wireColumns": [
+          "t.t_desc",
+          "t.invoice_amt",
+          "t.t_amt",
+          "t.old_amt",
+          "t.amt_sum",
+          "t.tk_guid",
+          "t.xtype",
+          "t.uni_prj_code",
+          "t.bu_code",
+          "t.t_name",
+          "t.ord",
+          "t.tlevel",
+          "t.tparent",
+          "t.tleaf",
+          "t.texpanded",
+          "t.tloaded"
+        ]
+      }
+    ],
+    "travel": [
+      {
+        "winno": "1492",
+        "funcno": "1714",
+        "tablenames": "@{ybx_query_pc_package.getrows_user_bt_72:#61-serialno#;#0-userinfo.userid#;#61-xgbt_src#}@ t",
+        "needcount": false,
+        "treeGrid": false,
+        "columns": [
+          "t.sno",
+          "t.sname",
+          "t.slevel",
+          "t.srankpost",
+          "t.city",
+          "t.cg_wh_bz",
+          "t.cg_wh_rate",
+          "t.startdate",
+          "t.staydays",
+          "t.STAYDAYS_HS",
+          "t.STAYDAYS_JT",
+          "t.hsbt_amt",
+          "t.jtbt_amt",
+          "t.bg_hotel_amt",
+          "t.cg_cq_amt",
+          "t.total_amt",
+          "t.cz",
+          "t.serial_no"
+        ]
+      }
+    ],
+    "approval": [
+      {
+        "winno": "74",
+        "funcno": "105",
+        "tablenames": "@{ybx_query_pc_package.wfplc_query_approval_v1:#0-userinfo.userid#;#514-t.serial_no#!p!#514-t.uni_prj_code#!p!#514-t.req_sname#!p!#514-t.bx_type#!p!#514-t.proj_type#!p!#514-t.startdate#!p!#514-t.enddate#!p!#514-t.approval_type#!p!#514-t.amt_s#!p!#514-t.amt_e#!p!#514-t.bx_spmorezt#!p!#514-t.uni_prj_name#!p!#514-t.remark#!p!#514-t.rewardtypes#!p!#514-t.tno#}@ t",
+        "needcount": true,
+        "treeGrid": false,
+        "columns": [
+          "t.serial_no",
+          "t.node_name1",
+          "t.req_name",
+          "t.uni_prj",
+          "t.charge_snos",
+          "t.rewardtypes",
+          "t.remark",
+          "t.amount",
+          "t.status_name",
+          "t.current_milli",
+          "t.cz",
+          "t.curr_mans",
+          "t.collab_users",
+          "t.wfname",
+          "t.wf_name",
+          "t.uni_key",
+          "t.basetable_key",
+          "t.node_id",
+          "t.collab_ord1",
+          "t.collab_name1",
+          "t.collab_ord",
+          "t.isNeedCollab",
+          "t.signtype",
+          "t.status_name_dtl",
+          "t.nodecnt"
+        ],
+        "multifields": "t.serial_no,t.collab_users,t.wfname,t.uni_key,t.node_id,t.collab_ord,t.isNeedCollab,t.signtype,t.nodecnt"
+      }
+    ],
+    "approval_history": [
+      {
+        "winno": "75",
+        "funcno": "107",
+        "tablenames": "@{ybx_query_pc_package.wfplc_query_approved:#0-userinfo.userid#;#719-t.serial_no#!p!#719-t.uni_prj_code#!p!#719-t.req_sname#!p!#719-t.bx_type#!p!#719-t.proj_type#!p!#719-t.startdate#!p!#719-t.enddate#!p!#719-t.approval_type#!p!#719-t.pz_uni_no#!p!#719-t.total_amt#!p!#719-t.flow_status#!p!#719-t.states#!p!#719-t.remark#!p!#719-t.uni_prj_name#!p!#719-t.grantcwprint#!p!#719-t.cl_abst#!p!#719-t.charge_name#}@ t",
+        "needcount": true,
+        "treeGrid": false,
+        "columns": [
+          "t.serial_no",
+          "t.node_name1",
+          "t.req_name",
+          "t.uni_prj",
+          "t.remark",
+          "t.pz_uni_no",
+          "t.amount",
+          "t.status_name",
+          "t.current_milli",
+          "t.status_date",
+          "t.done_date",
+          "t.bxpdf_desc",
+          "t.grantcwprint",
+          "t.cz",
+          "t.curr_mans",
+          "t.collab_users",
+          "t.wfname",
+          "t.wf_name",
+          "t.uni_key",
+          "t.basetable_key",
+          "t.node_id",
+          "t.collab_ord1",
+          "t.collab_name1",
+          "t.collab_ord",
+          "t.isNeedCollab",
+          "t.signtype",
+          "t.status_name_dtl"
+        ],
+        "multifields": ""
+      }
+    ]
+  }
+}

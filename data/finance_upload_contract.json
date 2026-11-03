@@ -1,0 +1,12 @@
+{
+  "winno": "60",
+  "funcno": "84",
+  "definition_sha256": "65d40a0b018e9e50ded7b3dd95c95b372fb3f293ca3397972d6f11f6918364ed",
+  "save_caption": "保存发票",
+  "source": "YBX",
+  "trip_id": "",
+  "max_files": 10,
+  "max_file_bytes": 5242880,
+  "chunk_bytes": 131072,
+  "upload_plugin_sha256": "f22cbc34a8c50f3463d47f31be65dc5f4c21a13d88a2b16aeb17dbd64c0380ec"
+}

@@ -1,0 +1,34 @@
+{
+  "schema": "ustc-native-supplement-v1",
+  "nonvat": {
+    "windows": [
+      "33",
+      "9",
+      "61",
+      "551"
+    ]
+  },
+  "allowance": {
+    "windows": [
+      "353",
+      "867",
+      "1991",
+      "128",
+      "1525",
+      "352"
+    ]
+  },
+  "definitions": {
+    "33": "3758ba7ae178cbe5104dc6b49460457343250c4308134d533bf8555d74472fa4",
+    "9": "91d44b4b139d6fe40bda9f569abe77728401e5beeb18362f07f7822764c86ce2",
+    "61": "4470bdea7b85dcc3fd426d6ddb053ed8d26f4315ff1e79b694bedad817e2fc90",
+    "551": "0298d98de225efef472479416cc2307c762593979fa5d766aa7d91125df424e6",
+    "288": "2dfeb050b517fe90d36b19bdb449c563ebe1f8a2a3bc51393b46d621d54e9d2f",
+    "353": "834d93d6e335557576b2d55b9672324e4616e98b631f03c4ccd224475a779217",
+    "867": "981296ba3bc573b6b10b361f806a95987bc7ec35737e6f03bfe610e9ee475814",
+    "1991": "c8b0e6dcd0101d50377c23f271161336b51b826c9d3022406c25a126c2115dd3",
+    "128": "a2d9b27ce8429c8631bbace0728ff55d105a0bafc83567566ca3f3eee6c6422c",
+    "1525": "47f1395569cbf64a3516936b85f7008bc06e90e4f7982bbeee6f761f8b423f1d",
+    "352": "76a6d98b67376350f42ea55e370a72948349d9aa3856c85c354fcf66e8012a7d"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "list_definition_sha256": "c31426ce3775d58f07f9019184341b7463f834b896e0930fe154f4e1016798d8",
+  "details_definition_sha256": "a735e653599d3bdb353c637f4b51b226b888378739d8b4d4e47306748fc089fa",
+  "outer_template_sha256": "a9a3ccc819a5ac1a113b43b64eb15f352413be3678f939291884d9b0cc4edc61",
+  "shell_inline_scripts_sha256": "4adb01be1bc2c57a3f629a37a6b9594938de9b41b61b4a1ea8851583b63eb550",
+  "list_button": "CA0541BD7A3D46ECA2078DD7B5FA8FDC",
+  "initialization_keys": [
+    "0-wfname",
+    "0-uni_key",
+    "0-basetable_key",
+    "0-project_id",
+    "0-node_id",
+    "0-shcj_hide_return",
+    "0-is_show_ysppdf",
+    "0-ysp_special_html",
+    "0-init_ckmx_btn_info"
+  ],
+  "callbacks": {
+    "before_apply_list_dtl": "a39d8062f22eac6da123374a8e136b2247fcf9edd2f2e7b0a3f1617eebf80869",
+    "after_apply_list_dtl": "89f4476b0fdbe242e53dbc38bec8255d5b36756c59266a413d1d6421da996821"
+  }
+}

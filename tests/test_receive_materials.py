@@ -13,7 +13,7 @@ from material_intake_service import configure_bundled_archive
 class ReceiveMaterialsTests(unittest.TestCase):
     def test_path_only_intake_uses_original_worker_and_compact_continuation(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             materials = root / "materials"
             materials.mkdir()
             source = root / "桌面合成材料.txt"
@@ -69,7 +69,7 @@ class ReceiveMaterialsTests(unittest.TestCase):
         self,
     ):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             materials = root / "materials"
             materials.mkdir()
             external = root / "桌面"
@@ -95,7 +95,7 @@ class ReceiveMaterialsTests(unittest.TestCase):
         from operator_workbench import Workbench
 
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             materials = root / "materials"
             materials.mkdir()
             source = root / "a.txt"

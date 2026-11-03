@@ -1,0 +1,46 @@
+{
+  "schema": "ustc-native-split-contract-v1",
+  "definition_sha256": "888af6e6b3e2b0e26fabf22e66ae87a9bf7580a8fcd1662eccb8142a96d1cc01",
+  "category_sha256": "c768f225fa4ec66daa5ff3e532d113286545a310bd441f365a7812625421b8e5",
+  "open_button": "FE1CA890732544FBB7D0E2961E793225",
+  "queries": {
+    "305": {
+      "columns": [
+        "t.cz",
+        "t.title_pc",
+        "t.jj_subjname",
+        "t.description",
+        "t.amt",
+        "t.jj_subj",
+        "t.tk_guids",
+        "t.select_flag",
+        "t.xtype",
+        "t.jump_web"
+      ],
+      "tablenames": "@{ybx_query_pc_package.wfp_query_bx_tks_v1:#61-serialno#;#61-xtype#;#0-userinfo.userid#;#61-xtype_order#}@ t"
+    },
+    "1666": {
+      "columns": [
+        "t.select_value",
+        "t.select_flag",
+        "t.select_key"
+      ],
+      "tablenames": "(@{ybx_sj_get_jjsubjs:#61-serialno#;#61-xtype#;#0-userinfo.userid#}@) t"
+    },
+    "1669": {
+      "columns": [
+        "t.tk_display_abst",
+        "t.invoice_type",
+        "t.amt",
+        "t.sj_amt",
+        "t.split_amt",
+        "t.sj_bf",
+        "t.serial_no",
+        "t.tk_guid",
+        "t.inner_ord",
+        "t.select_flag"
+      ],
+      "tablenames": "(@{ybx_sj_get_tks:#61-serialno#;#61-xtype#;#0-userinfo.userid#;#1666-t.select_key#}@) t"
+    }
+  }
+}

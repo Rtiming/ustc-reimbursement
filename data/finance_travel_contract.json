@@ -1,0 +1,22 @@
+{
+  "schema": "ustc-travel-http-contract-v1",
+  "winno": "938",
+  "funcno": "1150",
+  "save_caption": "保存",
+  "definition_sha256": "ca11441ad6f9285a776b6dc724164e6dc9acd56f6c3222ed84dd2f76e5bade88",
+  "bindSql": "$6e9a3557b3b7f71a959205ae050cde70|#61-tks_guid#,#0-userinfo.userid#",
+  "airport_window": "325",
+  "airport_definition_sha256": "62d4ec1fade7b4101e9657ea5147228c23fb4ec97a6461eaebc296513be6f930",
+  "airport_query": {
+    "funcno": "444",
+    "tablenames": "@{ybx_query_pc_package.wfp_query_airport:#0-userinfo.userid#}@ t",
+    "needcount": true
+  },
+  "airport_columns": [
+    "t.citycode",
+    "t.cityname",
+    "t.airportname",
+    "t.shortname"
+  ],
+  "limits": "one existing INVOICE journey; missing or matching traveler; source-backed dates/person/airport; preserve ticket and all other journey fields; no actual save acceptance"
+}

@@ -66,7 +66,7 @@ class FeedbackTests(unittest.TestCase):
         v['rows'][0]['t.process_opinion']=original
         r=project(v,'AB123',SOURCE)
         with tempfile.TemporaryDirectory() as d:
-            out=Path(d)/'new';export(r,out)
+            out=Path(d).resolve()/'new';export(r,out)
             page=(out/'财务反馈汇总.html').read_text(encoding='utf-8')
             self.assertNotIn('</script><script>alert(1)',page)
             self.assertIn(original,(out/'财务反馈原文.txt').read_text(encoding='utf-8'))

@@ -167,8 +167,9 @@ class RegisteredSession(RegisteredPageOwner):
                 'https://cwzh.ustc.edu.cn/WFManager/home2.jsp',
                 'https://cwzh.ustc.edu.cn/YBX/login.html',
             ):
-                return
-            raise APIError('registered_tab_changed', '当前页不是登记财务主页面')
+                pass
+            else:
+                raise APIError('registered_tab_changed', '当前页不是登记财务主页面')
         if hits[0].get('frozen') is not True:
             return
         pending = self.folder / 'page-relocation-pending.json'
@@ -184,7 +185,7 @@ class RegisteredSession(RegisteredPageOwner):
             'requested_at_ns': time.time_ns(),
         }
         atomic_json(pending, intent)
-        selection = {}
+        selection = {'allow_access': True} if allow_access else {}
         if hits[0].get('active') is False:
             windows = [w for w in observed.get('windows', []) if w.get('window_id') == state['window_id']]
             if len(windows) != 1 or not windows[0].get('active_tab_id'):
