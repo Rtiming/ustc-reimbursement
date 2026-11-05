@@ -240,6 +240,7 @@
     "tests/test_intake_groups.py",
     "tests/test_intake_review.py",
     "tests/test_local_file_lock.py",
+    "tests/test_loopback_proxy.py",
     "tests/test_mac_edge_bridge.py",
     "tests/test_mac_secure_auth.py",
     "tests/test_material_archive.py",

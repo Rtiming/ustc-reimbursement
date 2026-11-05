@@ -381,7 +381,8 @@ def main():
                 origin = old.get('origin','')
                 require(re.fullmatch(r'http://127\.0\.0\.1:[0-9]{1,5}', origin), '原工作台登记地址无效')
                 try:
-                    with urllib.request.urlopen(origin+'/health',timeout=2) as response:
+                    # 探测固定回环服务，不继承外部HTTP代理。
+                    with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(origin+'/health',timeout=2) as response:
                         health = json.load(response)
                 except (OSError,ValueError) as error:
                     raise RuntimeError('原工作台仍在运行但未响应，请检查原任务；未创建第二个服务') from error

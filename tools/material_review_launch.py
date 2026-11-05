@@ -105,7 +105,8 @@ def stop(workspace):
     token=parse_qs(u.fragment)['access'][0]
     req=urllib.request.Request(origin+'/api/shutdown',data=b'{}',headers={
         'Cookie':info.get('cookie_name','review_session')+'='+token,'Origin':origin,'X-Review-Action':'1','Content-Type':'application/json'})
-    with urllib.request.urlopen(req,timeout=3) as response:
+    # 本机访问码不交给用户的外部代理。
+    with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req,timeout=3) as response:
         require(json.load(response).get('ok'),'工作台未确认停止')
     deadline=time.monotonic()+5
     cleaned=False
@@ -136,7 +137,7 @@ def live(info):
         token=parse_qs(u.fragment)['access'][0]
         route='/api/health' if info.get('code_identity') else '/api/data'
         req=urllib.request.Request(f'http://127.0.0.1:{u.port}'+route,headers={'Cookie':info.get('cookie_name','review_session')+'='+token})
-        with urllib.request.urlopen(req,timeout=2) as r:
+        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req,timeout=2) as r:
             return r.status==200 and (route=='/api/data' or json.load(r).get('workspace')==info['workspace'])
     except (OSError,KeyError,ValueError,urllib.error.URLError):return False
 
@@ -146,7 +147,7 @@ def active_views(info):
         u=urlsplit(info['url']);token=parse_qs(u.fragment)['access'][0]
         req=urllib.request.Request(f'http://127.0.0.1:{u.port}/api/health',headers={
             'Cookie':info.get('cookie_name','review_session')+'='+token})
-        with urllib.request.urlopen(req,timeout=2) as response:
+        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req,timeout=2) as response:
             data=json.load(response)
         require(data.get('workspace')==info['workspace'],'页面所属工作台变化')
         return int(data.get('active_views',0))
