@@ -74,7 +74,8 @@ def read_json(path):
 def atomic_json(path, data):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name+'.'+uuid.uuid4().hex+'.tmp')
+    # 临时文件仍在同一私有目录，但不重复长业务文件名，避免先撞上Windows路径上限。
+    tmp = path.with_name('.'+uuid.uuid4().hex+'.tmp')
     try:
         with tmp.open('x', encoding='utf-8', newline='\n') as stream:
             private_path(tmp)

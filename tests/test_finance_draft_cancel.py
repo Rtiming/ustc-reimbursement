@@ -2,6 +2,7 @@ import copy
 import hashlib
 import json
 import subprocess
+import shutil
 import sys
 import tempfile
 import unittest
@@ -26,6 +27,8 @@ $.getProjID=()=> 'WF_YBX';$.UC={bindData:k=>k.includes('userid')?(o.wrongUser?'O
 const context={$,window:{},location:{origin:'https://cwzh.ustc.edu.cn'},document:{querySelectorAll:()=>[dialog],getElementById:()=>element}};
 let result,error,replay;try{result=vm.runInNewContext(__SOURCE__,context)(p);try{vm.runInNewContext(__SOURCE__,context)(p);}catch(e){replay=e.message}}catch(e){error=e.message}
 console.log(JSON.stringify({result,error,replay,clicks}));'''.replace('__PLAN__',json.dumps(plan,ensure_ascii=False)).replace('__OPTIONS__',json.dumps(options)).replace('__SOURCE__',json.dumps('('+CANCEL_SCRIPT+')',ensure_ascii=False))
+        if shutil.which('node') is None:
+            self.skipTest('Node开发测试运行时未安装；三系统CI继续执行此合同')
         result=subprocess.run(['node'],input=script,text=True,capture_output=True,check=True)
         return json.loads(result.stdout)
 

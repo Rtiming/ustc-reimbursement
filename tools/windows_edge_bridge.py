@@ -25,7 +25,7 @@ def atomic_private(path, value, *, exclusive=False):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     private_path(path.parent)
-    temporary = path.with_name(path.name + '.' + uuid.uuid4().hex + '.tmp')
+    temporary = path.with_name('.' + uuid.uuid4().hex + '.tmp')
     try:
         with temporary.open('x', encoding='utf-8') as stream:
             private_path(temporary)
@@ -37,7 +37,18 @@ def atomic_private(path, value, *, exclusive=False):
             os.link(temporary, path)
             temporary.unlink()
         else:
-            os.replace(temporary, path)
+            # Windows读者短暂持有旧状态文件时会拒绝替换；接续同一份已冻结字节，
+            # 不能让状态轮询终止主机，也不重建请求或再次派发业务。
+            deadline = time.monotonic() + 1 if sys.platform == 'win32' else 0
+            while True:
+                try:
+                    os.replace(temporary, path)
+                    break
+                except PermissionError as error:
+                    if (sys.platform != 'win32' or getattr(error, 'winerror', None) not in {5, 32, 33}
+                            or time.monotonic() >= deadline):
+                        raise
+                    time.sleep(.01)
     finally:
         if temporary.exists():
             temporary.unlink()

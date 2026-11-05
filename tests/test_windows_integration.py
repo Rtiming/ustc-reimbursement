@@ -14,9 +14,79 @@ sys.path.insert(0, str(ROOT / 'tools'))
 from reimburse import require_native_platform, applicant_review_observed
 from finance_expense_amount import SCHEMA, validate
 from windows_auth_pipe import private_pipe_acl_matches
+import windows_edge_bridge as bridge
+from assistant_api import atomic_json
 
 
 class WindowsIntegrationTests(unittest.TestCase):
+    def test_atomic_state_temporary_names_fit_the_windows_path_budget(self):
+        with tempfile.TemporaryDirectory() as temp:
+            parent = Path(temp).resolve()
+            while len(str(parent)) < 220:
+                remaining = 220 - len(str(parent)) - 1
+                if remaining <= 0:
+                    break
+                parent = parent / ('x' * min(32, remaining))
+            parent.mkdir(parents=True)
+            target = parent / 'material_intake_request.json'
+            original = os.replace
+            observed = []
+
+            def replace(source, destination):
+                self.assertLess(len(str(source)), 260)
+                self.assertEqual(source.parent, destination.parent)
+                observed.append(source)
+                return original(source, destination)
+
+            with patch.object(bridge.os, 'replace', side_effect=replace):
+                atomic_json(target, {'owner': 'task'})
+                bridge.atomic_private(target, {'owner': 'bridge'})
+            self.assertEqual(json.loads(target.read_text()), {'owner': 'bridge'})
+            self.assertEqual(len(observed), 2)
+
+    def test_shared_windows_status_file_retries_only_frozen_replacement(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'status.json'
+            path.write_text('{"before":true}')
+            original = os.replace
+            blocked = PermissionError('synthetic sharing conflict')
+            blocked.winerror = 5
+            attempts = []
+
+            def replace(source, target):
+                attempts.append((source, target, source.read_bytes()))
+                if len(attempts) < 3:
+                    self.assertEqual(json.loads(path.read_text()), {'before': True})
+                    raise blocked
+                return original(source, target)
+
+            with patch('windows_edge_bridge.sys.platform', 'win32'), patch.object(bridge.os, 'replace', side_effect=replace):
+                bridge.atomic_private(path, {'after': True})
+            self.assertEqual(json.loads(path.read_text()), {'after': True})
+            self.assertEqual(len(attempts), 3)
+            self.assertTrue(all(row == attempts[0] for row in attempts))
+            self.assertEqual(list(Path(temp).glob('*.tmp')), [])
+
+    def test_persistent_status_permission_failure_keeps_original_and_exclusive_intent(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'status.json'
+            path.write_text('{"before":true}')
+            blocked = PermissionError('synthetic persistent denial')
+            blocked.winerror = 5
+            with patch('windows_edge_bridge.sys.platform', 'win32'), patch.object(bridge.os, 'replace', side_effect=blocked) as replace, patch.object(bridge.time, 'monotonic', side_effect=[0, 2]):
+                with self.assertRaises(PermissionError):
+                    bridge.atomic_private(path, {'after': True})
+                self.assertEqual(replace.call_count, 1)
+            self.assertEqual(json.loads(path.read_text()), {'before': True})
+            with self.assertRaises(FileExistsError):
+                bridge.atomic_private(path, {'intent': True}, exclusive=True)
+
+    def test_missing_node_development_runtime_is_explicitly_reported(self):
+        import node_support
+        with patch.object(node_support.shutil, 'which', return_value=None):
+            with self.assertRaises(unittest.SkipTest):
+                node_support.node_run('process.exit(0)', text=True)
+
     def test_powershell_bom_request_uses_the_same_dispatch(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / '请求 with spaces.json'
