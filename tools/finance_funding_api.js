@@ -31,6 +31,8 @@ async function reimbursementFundingBuild(c) {
     const byCode=rows.filter(r=>r['t.uni_prj_code']===f.code);
     const matches=f.owner_name ? byCode.filter(r=>typeof r['t.CHARGE_NAME']==='string' &&
       r['t.CHARGE_NAME'].split(/[,，]/).map(s=>s.trim()).includes(f.owner_name)) : byCode;
+    if(byCode.some(r=>r['t.select_flag']==='已选' && !matches.includes(r)))
+      throw Error('FUNDING_API_EXTRA_SELECTION');
     if(byCode.length && !matches.length) throw Error('FUNDING_API_OWNER_BINDING');
     if(!matches.length){
       const other=definition.funcs.find(q=>String(q.funcno)==='243'),field=other?.formFields.find(q=>q.fieldname==='t.proj_code');

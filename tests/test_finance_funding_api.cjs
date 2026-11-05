@@ -28,6 +28,7 @@ async function run(mode='ok',write=false){
   if(mode==='definition')definition.wins[0].grid_btns[0].pre_check=true;
   if(mode==='duplicate')candidates.push({...candidates[0]});
   if(mode==='owner_duplicate')candidates.push({...candidates[0],'t.grant_id':'G_OTHER','t.CHARGE_NAME':'Other'});
+  if(mode==='selected_other_owner')candidates.push({...candidates[0],'t.grant_id':'G_OTHER','t.CHARGE_NAME':'Other','t.select_flag':'已选'});
   if(mode==='missing_owner'){candidates.push({...candidates[0],'t.CHARGE_NAME':'Other'});delete c.funding[0].owner_name;}
   if(mode==='extra')candidates.push({'t.uni_prj_code':'OTHER','t.select_flag':'已选'});
   if(mode==='owner')candidates[0]['t.CHARGE_NAME']='Other';
@@ -55,7 +56,7 @@ async function run(mode='ok',write=false){
 (async()=>{
   assert.equal((await run()).save_dispatched,false);
   assert.deepEqual(JSON.parse(JSON.stringify((await run('empty_default')).changes)),{projects:['F1']});
-  for(const mode of ['definition','duplicate','extra','owner','grant','amount','existing','approved','incomplete','missing_owner'])await assert.rejects(()=>run(mode));
+  for(const mode of ['definition','duplicate','extra','owner','grant','amount','existing','approved','incomplete','missing_owner','selected_other_owner'])await assert.rejects(()=>run(mode));
   assert.equal((await run('owner_duplicate')).candidates[0].grant_id,'G0');
   assert.equal((await run('owner_duplicate',true)).state,'saved_independent_readback_required');
   assert.equal((await run('ok',true)).state,'saved_independent_readback_required');
