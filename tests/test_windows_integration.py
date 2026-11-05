@@ -15,9 +15,35 @@ from reimburse import require_native_platform, applicant_review_observed
 from finance_expense_amount import SCHEMA, validate
 from windows_auth_pipe import private_pipe_acl_matches
 import windows_edge_bridge as bridge
+from assistant_api import atomic_json
 
 
 class WindowsIntegrationTests(unittest.TestCase):
+    def test_atomic_state_temporary_names_fit_the_windows_path_budget(self):
+        with tempfile.TemporaryDirectory() as temp:
+            parent = Path(temp).resolve()
+            while len(str(parent)) < 220:
+                remaining = 220 - len(str(parent)) - 1
+                if remaining <= 0:
+                    break
+                parent = parent / ('x' * min(32, remaining))
+            parent.mkdir(parents=True)
+            target = parent / 'material_intake_request.json'
+            original = os.replace
+            observed = []
+
+            def replace(source, destination):
+                self.assertLess(len(str(source)), 260)
+                self.assertEqual(source.parent, destination.parent)
+                observed.append(source)
+                return original(source, destination)
+
+            with patch.object(bridge.os, 'replace', side_effect=replace):
+                atomic_json(target, {'owner': 'task'})
+                bridge.atomic_private(target, {'owner': 'bridge'})
+            self.assertEqual(json.loads(target.read_text()), {'owner': 'bridge'})
+            self.assertEqual(len(observed), 2)
+
     def test_shared_windows_status_file_retries_only_frozen_replacement(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / 'status.json'
