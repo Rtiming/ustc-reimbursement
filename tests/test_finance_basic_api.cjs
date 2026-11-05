@@ -37,7 +37,8 @@ async function run(mode, write = false) {
     } else {
       assert.equal(o.url,'common_callProc.action');
       const c=JSON.parse(o.data.userData);assert.equal(c['WF_YBX$61-SERIALNO'],'123');
-      const value=c['WF_YBX$60-T.LC_ACCEPTER']==='Teacher' ? (mode==='blankname'?' ':mode==='ambiguous'?'100/Teacher/Unit,200/Teacher/Unit':'100/Teacher/Unit') : (mode==='wrongid'?'Other':'Teacher');
+      assert.equal(c['WF_YBX$60-T.LC_ACCEPTER'],'100');
+      const value=mode==='wrongid'?'Other':mode==='ambiguous'?'100/Teacher/Unit,200/Teacher/Unit':mode==='descriptor'?'100/Teacher/Unit':mode==='descriptor_wrongid'?'200/Teacher/Unit':mode==='empty_id'?'':'Teacher';
       result='passlocal(60-lc_value:'+value+';60-lc_field:lc_accepter_name)';
     }
     return{done(fn){this.fn=fn;return this;},fail(){this.fn(result);return this;}};
@@ -61,9 +62,10 @@ async function run(mode, write = false) {
 (async()=>{
   const r=await run(); assert.equal(r.complete,true);assert.equal(r.system_write,false);assert.equal(r.save_dispatched,false);
   assert.equal(r.original['t.untouched'],'Preserve me');assert(!Object.hasOwn(r.changes,'t.untouched'));assert.equal(r.changes['t.abst'],'New');
-  for(const mode of ['drift','missing','judge','context','hidden','ambiguous','wrongid','phone'])await assert.rejects(()=>run(mode));
+  for(const mode of ['drift','missing','judge','context','hidden','ambiguous','wrongid','descriptor_wrongid','empty_id','phone'])await assert.rejects(()=>run(mode));
   const saved=await run('ok',true);assert.equal(saved.save_dispatched,true);assert.equal(saved.requires_readback,true);
   assert.equal((await run('blankname',true)).teacher.id,'100');
+  assert.equal((await run('descriptor',true)).teacher.department,'Unit');
   const allowance=await run('allowance',true);assert.equal(allowance.teacher.applicable,false);assert(!Object.hasOwn(allowance.prepared?.changes||allowance.changes,'t.lc_accepter'));
   for(const mode of ['timeout','savejudge','saveerror']){
     const failed=await run(mode,true);assert.equal(failed.state,'unknown_save_readback_required');assert.equal(failed.save_dispatched,true);

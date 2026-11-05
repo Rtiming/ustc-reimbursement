@@ -101,6 +101,7 @@
     nextBeforeSource:typeof window.ybx_jbxx_next_before==='function'?String(window.ybx_jbxx_next_before).slice(0,16000):null};
   const visibleDialogs=[...document.querySelectorAll('.ui-dialog')].filter(e=>e.getClientRects().length).map(e=>({text:e.innerText.slice(0,6000),buttons:[...e.querySelectorAll('button')].filter(b=>b.getClientRects().length).map(b=>({text:b.innerText,btnname:b.getAttribute('btnname'),disabled:!!b.disabled}))}));
   return {ok: true, currentPage: String($.page.currPage), projid: $.getProjID(), nativeRequests:$.active, readinessWaitMs, readinessWaitTimedOut, identity:{userid:$.UC.bindData('#0-userinfo.userid#'),username:$.UC.bindData('#0-userinfo.username#')}, uploadNativeState, serial:$.UC.bindData('#61-serialno#'), node:$.UC.bindData('#61-node_id#'), uploadTracking, grids, forms,
+    applicantAgreementVisible:[...document.querySelectorAll('.foot_winWF_YBX_76 button[btnname="同意"]')].some(e=>e.getClientRects().length>0),
     frames,draftContext,visibleDialogs,
     visibleText: document.body.innerText.slice(0, 16000),
     visibleInputs: [...document.querySelectorAll("input,select,textarea")].filter(e => e.getClientRects().length && !["password","hidden"].includes(e.type))

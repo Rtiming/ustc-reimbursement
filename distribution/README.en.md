@@ -10,7 +10,7 @@ The Windows offline bundle includes a pinned Python runtime and dependencies. Ex
 
 A local reimbursement assistant for people and AI agents: document intake and archiving, PDF/OCR, sourced policy profiles, CLI/JSON, and stdio MCP. The browser adapter targets the University of Science and Technology of China (USTC). This is an independent project, not an official university service.
 
-This is **0.6.0-beta.1**, a prerelease for isolated installation, document handling and interface evaluation. See the [bilingual release notes](docs/releases/v0.6.0-beta.1.md). **The real Windows finance workflow has not been tested.** Live approval, portal exports and the five-minute batch target are not certified. Existing 0.4 installations do not receive these security fixes automatically.
+This is **0.6.1-beta.1**, a prerelease for isolated installation, document handling and interface evaluation. See the [bilingual release notes](docs/releases/v0.6.1-beta.1.md). Historical Windows operations have been recorded on an older patched installation. This release incorporates reusable fixes; exact-package acceptance and live device acceptance remain separate. Every payment route, live export and the five-minute batch target are not certified. Existing 0.4 installations do not receive these security fixes automatically.
 
 ## Install
 
@@ -54,7 +54,7 @@ Save the request and run `sh tools/reimbursement.sh call --input /absolute/path/
 | Local OCR | Explicit `--with-ocr`; recognized fields remain candidates |
 | Remote OCR / ledger | A separately configured provider; the maintainer's infrastructure is not bundled |
 | USTC finance browser | Local Edge setup, the user's own account, case-specific authorization and readback |
-| Registered batch workflow | Shared macOS/Windows test implementation; real Windows finance remains untested |
+| Registered batch workflow | Shared macOS/Windows test implementation; historical field records exist; exact-device acceptance remains separate |
 | Linux finance browser | Unsupported |
 | Mobile capture / authored spreadsheets | Optional external adapters and runtimes |
 

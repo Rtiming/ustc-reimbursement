@@ -76,12 +76,12 @@ async function reimbursementBasicBuild(c) {
     if (get('60-lc_field') !== 'lc_accepter_name') throw Error('BASIC_API_TEACHER_TARGET');
     return get('60-lc_value');
   }
-  const candidateText = await teacherLookup(basic.teacher_name);
-  const candidate = candidateText.trim() ? /^([A-Za-z0-9]{2,40})\/([^/\r\n,]+)\/([^/\r\n,]+)$/.exec(candidateText) : null;
-  if (candidateText.trim() && (!candidate || candidate[1] !== basic.teacher_id || candidate[2].trim() !== basic.teacher_name))
-    throw Error('BASIC_API_TEACHER_NOT_UNIQUE:' + candidateText);
-  const name = await teacherLookup(basic.teacher_id);
-  if (name !== basic.teacher_name) throw Error('BASIC_API_TEACHER_ID_MISMATCH');
+  // 已确认工号是唯一查询键；学校可返回纯姓名或工号/姓名/单位。
+  const observed = await teacherLookup(basic.teacher_id);
+  const candidate = /^([A-Za-z0-9]{2,40})\/([^/\r\n,]+)\/([^/\r\n,]+)$/.exec(observed);
+  const name = candidate ? candidate[2].trim() : observed;
+  if (name !== basic.teacher_name || candidate && candidate[1] !== basic.teacher_id)
+    throw Error('BASIC_API_TEACHER_ID_MISMATCH');
   if(teacherVisible)set('60-t.lc_accepter_name', name);
   else for(const field of ['t.lc_accepter','t.lc_accepter_name'])set('60-'+field,original[field]);
   set('61-lc_accepter_name', '');

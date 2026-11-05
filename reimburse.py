@@ -19,6 +19,19 @@ from run_case import STAGES
 from assistant_contract import CASE_PROFILES
 
 
+def require_native_platform(tab_id=None, *, require_tab=False):
+    from finance_backend import backend
+    backend()  # 复用实际通道owner的系统/后端校验，不能只放宽操作系统名称。
+    if require_tab and not tab_id:
+        raise ValueError('执行须明确当前Edge财务tab-id')
+
+
+def applicant_review_observed(result):
+    # 508也出现在可编辑草稿；可见本人同意控件才是此旧回读的正证据。
+    return (result.get('node') == '508' and bool(result.get('serial'))
+            and result.get('applicantAgreementVisible') is True)
+
+
 def emit(result):
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
@@ -514,7 +527,7 @@ def acknowledge(paths, receipt, note, outcome):
     if outcome == 'saved' and previous['operation'].startswith('step:'):
         stage = previous['operation'].split(':', 1)[1]
         state['operator_verified_stages'] = list(dict.fromkeys(state.get('operator_verified_stages', []) + [stage]))
-    if r.get('node') == '508' and r.get('serial') and not previous['operation'].startswith('correction:'):
+    if applicant_review_observed(r) and not previous['operation'].startswith('correction:'):
         c = json.loads(paths['form'].read_text(encoding='utf-8'))
         c.setdefault('review', {}).update(workflow_started=True, workflow_status='applicant_review_pending', node='508')
         write_json(paths['form'], c)
@@ -676,7 +689,7 @@ def main():
     if args.command == 'init': emit(init_case(args.id, args.directory, args.profile)); return 0
     if args.command == 'overview': emit(overview(args.bundle)); return 0
     if args.command == 'tabs':
-        if platform.system() != 'Darwin': raise ValueError('此命令仅支持macOS原生桥；Windows仅支持离线开发，静默后端尚未验收')
+        require_native_platform()
         from edge_read_probe import list_tabs
         emit({'finance_tab_ids': list_tabs(), 'system_write': False}); return 0
     if args.command == 'recover': emit(recover(args.receipt, args.tab_id)); return 0
@@ -751,7 +764,7 @@ def main():
         source = out/'submission.js'; source.write_text(script(c, proposal, args.action, m))
         if not args.execute:
             emit({'ok': True, 'system_write': False, 'script': str(source), 'validation': validation}); return 0
-        if platform.system() != 'Darwin' or not args.tab_id: raise ValueError('执行须为macOS Edge并明确当前tab-id')
+        require_native_platform(args.tab_id, require_tab=True)
         pending = paths['state'].parent/'pending_write.json'
         if pending.exists() and args.action not in ['inspect', 'status', 'status-readback', 'print-inspect', 'template-inspect', 'verification-cancel', 'applicant-return', 'dismiss-validation']: raise ValueError('上一写入未独立核对，先readback/ack-write')
         if args.action in WRITE_ACTIONS: begin_write(paths, c, 'submission:'+args.action, out, {'submission_plan': str(args.input), 'save_receipt': str((args.output or out/'submission.json').resolve())})
@@ -770,7 +783,7 @@ def main():
             if args.group not in proposal['expected_groups']: raise ValueError('apply须明确发票分组')
             if not args.execute: emit({'ok': True, 'system_write': False, 'validation': result, 'group': args.group,
                                        'steps': ['open', 'clear_old_funding', 'remainder', 'travel_funding', 'verify', 'save', 'reopen_verify']}); return 0
-            if platform.system() != 'Darwin' or not args.tab_id: raise ValueError('执行须为macOS Edge并明确当前tab-id')
+            require_native_platform(args.tab_id, require_tab=True)
             if (paths['state'].parent/'pending_write.json').exists(): raise ValueError('上一写入尚未独立回读，先recover/readback')
             from correction_batch import apply_group
             out = output_dir(paths)
@@ -780,7 +793,7 @@ def main():
         out = output_dir(paths); out.mkdir(parents=True)
         source = out/'correction.js'; source.write_text(script(c, proposal, args.action, args.key, args.group, args.kind))
         if not args.execute: emit({'ok': True, 'system_write': False, 'script': str(source), 'validation': result}); return 0
-        if platform.system() != 'Darwin' or not args.tab_id: raise ValueError('执行须为macOS Edge并明确当前tab-id')
+        require_native_platform(args.tab_id, require_tab=True)
         pending = paths['state'].parent/'pending_write.json'
         if pending.exists():
             previous = json.loads(pending.read_text())
@@ -935,7 +948,7 @@ def main():
         execute = args.execute
         if execute and (args.command=='upload' or args.action!='read'):
             raise ValueError('native_http_adapter_required: 旧CLI上传/建单写路径已停用；日常上传使用统一invoice action=upload，其他动作按business指南核对迁移状态')
-        if execute and platform.system() != 'Darwin': raise ValueError('此原生发票执行桥目前仅macOS Edge；Windows仅支持离线开发，静默后端尚未验收')
+        if execute: require_native_platform(args.tab_id, require_tab=True)
         if execute:guard_invoice_entry(c,m,args.command,getattr(args,'action',None))
         if args.command == 'invoice':
             save_options = []

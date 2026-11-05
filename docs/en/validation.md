@@ -13,3 +13,5 @@ Windows live finance work was deferred by the user. No current acceptance claim 
 Other architectures, browser revisions, user policies and optional providers require their own qualification. OCR output is candidate text. Saved fields, owner agreement, supervisor approval, official printing, original delivery and payment need their respective evidence.
 
 Security review and known-vulnerability scans are additional evidence with their own scope/date. They do not prove the absence of all defects. See [security](../../SECURITY.en.md) and the [review record](security-review.md).
+
+Version 0.6.1 runs every packaged Node contract on all three CI operating systems. Historical Windows field records belong to an older patched installation; they are distinct from acceptance of the exact new package and from per-device live business verification. See the bilingual release notes and Windows feature/acceptance guide.
