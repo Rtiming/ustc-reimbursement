@@ -266,6 +266,7 @@
     "tests/test_private_permissions.py",
     "tests/test_public_delivery.py",
     "tests/test_public_docs.py",
+    "tests/test_readback_capture.cjs",
     "tests/test_receive_materials.py",
     "tests/test_registered_bridge.py",
     "tests/test_registered_page_recovery.py",
