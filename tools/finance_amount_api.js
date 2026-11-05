@@ -14,7 +14,7 @@ function reimbursementAmountInventory(doc,serial,allowEmpty=false){
     const handler=td.getAttribute('onclick')||'';
     if(!handler.includes('报销项详情'))continue;
     const match=/^pageOpen_v1\('报销项详情','([^']+)'\)$/.exec(handler),params=match?.[1].split('&');
-    if(!params||params.length!==3||!params[0]||!/^\d{2,12}$/.test(params[1].trim())||!params[2].startsWith(params[0]+'!P!')||td.getAttribute('title')!=='可点击修改报销金额，修改的金额不能大于发票金额')throw Error('AMOUNT_API_ENTRY_CHANGED');
+    if(!params||params.length!==3||!params[0]||!/^(?:\d{2,12}|\*)$/.test(params[1].trim())||!params[2].startsWith(params[0]+'!P!')||td.getAttribute('title')!=='可点击修改报销金额，修改的金额不能大于发票金额')throw Error('AMOUNT_API_ENTRY_CHANGED');
     const amount=td.textContent.trim();ReimbursementHttpValues.moneyCents(amount);
     entries.push({group:params[0],subject:params[1].trim(),parameters:match[1],handler,amount,title:td.getAttribute('title')});
   }

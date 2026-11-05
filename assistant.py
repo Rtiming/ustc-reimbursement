@@ -338,7 +338,8 @@ def main():
                           expected_userid=args.expected_userid, execute=args.execute,
                           allow_incomplete=args.allow_incomplete)
     else:
-        request = json.loads(args.input.read_text(encoding='utf-8'))
+        # Windows PowerShell的UTF-8文件可带BOM；只在用户请求边界去除标记。
+        request = json.loads(args.input.read_text(encoding='utf-8-sig'))
         r = dispatch_request(AssistantService(material_roots=args.material_root), request)
     if args.command == 'workflow' and r.get('report_path') and not args.full_output:
         # The complete immutable run report is already on disk. Avoid emitting

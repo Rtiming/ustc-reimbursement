@@ -46,11 +46,13 @@ def main():
             ('offline-check', install + ['--config', str(deployment), '--check']),
             ('update-launcher', update + ['--help']),
             ('regression', [str(python), '-m', 'unittest', 'discover', '-s', 'tests', '-p', 'test_*.py']),
-            ('native-bridge-contract', ['node', 'tests/test_native_bridge.cjs']),
-            ('native-exports-contract', ['node', 'tests/test_system_print.cjs']),
-            ('applicant-agreement-contract', ['node', 'tests/test_applicant_submission.cjs']),
             ('stdio-material-ocr', [str(python), 'tools/distribution_smoke.py', '--mcp', '--materials', '--ocr', '--output', str(reports / 'smoke.json')]),
         ]
+        # 每个已打包原生合同在三系统执行，不能只抽查桥和打印。
+        contracts = [('native-' + path.stem, ['node', str(path.relative_to(package))])
+                     for path in sorted((package / 'tests').glob('test_*'))
+                     if path.suffix in {'.cjs', '.mjs'}]
+        commands[-1:-1] = contracts
         for name, command in commands:
             print('Running ' + name, flush=True)
             with (reports / (name + '.log')).open('w', encoding='utf-8') as log:

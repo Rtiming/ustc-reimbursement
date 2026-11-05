@@ -45,7 +45,7 @@ def validate(request):
     if not isinstance(request, dict) or request.get('schema') != SCHEMA:
         raise ValueError('须使用正式报销项窗口请求')
     for key, pattern in [('case_id', r'[A-Za-z0-9_-]{1,96}'), ('serial', r'[0-9]+'),
-                         ('subject', r'[0-9]{2,12}'), ('expected_userid', r'[A-Za-z0-9_.@-]{1,80}'), ('tab_id', r'[0-9]+')]:
+                         ('subject', r'(?:[0-9]{2,12}|\*)'), ('expected_userid', r'[A-Za-z0-9_.@-]{1,80}'), ('tab_id', r'[0-9]+')]:
         if not isinstance(request.get(key), str) or not re.fullmatch(pattern, request[key]):
             raise ValueError('窗口请求身份或参数不符：' + key)
     group = request.get('group')

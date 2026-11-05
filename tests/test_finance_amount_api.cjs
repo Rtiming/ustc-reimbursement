@@ -13,7 +13,7 @@ async function fixture(mode='ok'){
  const save={btnguid:'SAVE',check_func:'',procs:['`$'+'c'.repeat(32)+':#390-t.tk_guid#;#390-t.t_amt#;#390-t.ord#;#390-t.invoice_amt#;#61-serialno#;#0-userinfo.userid#']};
  const amount={wins:[{winno:282,func_btns:[save]}],funcs:[form],funcMap:{},actMap:{}};
  const data=()=>({T_DESC:'发票 '+ '9'.repeat(20),INVOICE_AMT_XS:'12.00',ZF_ZMT:'0.00',T_AMT:state.editor,INVOICE_AMT:'12.00',OLD_AMT:state.editor,SERIAL_NO:mode==='wrong_serial'?'999':serial,TK_GUID:guid,ORD:'1'});
- const entry=()=>({textContent:mode==='whole_bill'?String(Number(state.persisted)-4):state.persisted,getAttribute:name=>name==='title'?'可点击修改报销金额，修改的金额不能大于发票金额':mode==='handler'?"unknown('报销项详情')":"pageOpen_v1('报销项详情','测试组&30201&测试组!P!x')"});
+ const entry=()=>({textContent:mode==='whole_bill'?String(Number(state.persisted)-4):state.persisted,getAttribute:name=>name==='title'?'可点击修改报销金额，修改的金额不能大于发票金额':mode==='handler'?"unknown('报销项详情')":"pageOpen_v1('报销项详情','测试组&"+(mode==='unassigned'?'*  ':mode==='invalid_subject'?'??':'30201')+"&测试组!P!x')"});
  const doc={querySelectorAll:()=>mode==='whole_bill'?[entry(),{textContent:'4.00',getAttribute:name=>name==='title'?'可点击修改报销金额，修改的金额不能大于发票金额':"pageOpen_v1('报销项详情','另一组&3021801&另一组!P!x')"}]:[entry()]};
  const uc={'0-USERINFO.USERID':userid,'0-SHOW_ZFJE':mode==='formula'?'Y':'N'},original=JSON.stringify(uc);
  const $={getProjID:()=> 'WF_YBX',UC:{userData:uc,bindData:()=>userid},ajax:o=>{
@@ -34,7 +34,7 @@ async function fixture(mode='ok'){
   }else throw Error('unexpected endpoint:'+o.url);
   return{done(f){this.f=f;return this},fail(){this.f(result);return this}};
  }};
- const c={case_id:'fixture',serial,expected_userid:userid,group:'测试组',subject:'30201',expected_final_amount:'10.00',execute:true,pending_registered:true,
+ const c={case_id:'fixture',serial,expected_userid:userid,group:'测试组',subject:mode==='unassigned'?'*':'30201',expected_final_amount:'10.00',execute:true,pending_registered:true,
   basic_contracts:[],submission_contract:{shell_sha256:digest('shell'),inner_sha256:digest('inner')},
   amount_contract:{winno:'282',funcno:'390',save_button:'SAVE',bindSql,definition_sha256:digest(amount),main_definition_sha256:digest(main),open_button:open}};
  const ctx=vm.createContext({performance,crypto:webcrypto,TextEncoder,window:{jQuery:$},location:{origin:'https://cwzh.ustc.edu.cn',pathname:'/YBX/main.jsp'},DOMParser:class{parseFromString(){return doc}},
@@ -54,6 +54,7 @@ async function fixture(mode='ok'){
  const good=await fixture(),read=await good.inspect();assert.equal(read.amount_rows_complete,false);const result=await good.reduce();
  assert.equal(result.state,'saved_independent_readback_required');assert.equal(good.state.saves,1);assert.equal(good.state.initializations,2);
  assert.equal((await good.inspect({initialization_verified:true})).rows[0]['t.t_amt'],'10.00');
+ const unassigned=await fixture('unassigned');assert.equal((await unassigned.reduce()).ok,true);assert.equal(unassigned.state.saves,1);
  const whole=await fixture('whole_bill');const wholeSaved=await whole.reduce();assert.equal(wholeSaved.ok,true);assert.equal(whole.state.persisted,'10.00');assert.equal(whole.state.saves,1);assert.equal(whole.state.initializations,2);
  const recovery=await fixture('whole_bill'),before=await recovery.start();recovery.state.persisted='10.00';
  const recovered=await recovery.call('reimbursementAmountRecoverPersisted',{...recovery.c,action:'recover',execute:false,persistence_recovery:{fixture:true},expected_plan:before,reduction:{change_total:'2.00'}});
@@ -61,7 +62,7 @@ async function fixture(mode='ok'){
  const branch=await fixture('allocation');assert.equal((await branch.reduce()).branch.count,2);assert.equal(branch.state.initializations,1);
  for(const mode of ['missing_counter','unknown']){const f=await fixture(mode),r=await f.reduce();assert.equal(r.ok,false);assert(r.save_dispatched);assert.equal(f.state.saves,1);}
  const drift=await fixture('drift');assert.equal((await drift.reduce()).save_dispatched,false);assert.equal(drift.state.saves,0);
- for(const mode of ['formula','workflow','handler','wrong_serial','duplicate']){const f=await fixture(mode);await assert.rejects(()=>f.start());assert.equal(f.state.saves,0);}
+ for(const mode of ['formula','workflow','handler','wrong_serial','duplicate','invalid_subject']){const f=await fixture(mode);await assert.rejects(()=>f.start());assert.equal(f.state.saves,0);}
  assert(!/\.click\s*\(|\.trigger\s*\(|dispatchEvent|eval\s*\(/.test(source));
  console.log('amount HTTP: exact group, native init, complete rows, one reduction, dynamic branch, persistence refresh and unknown stop passed');
 })().catch(e=>{console.error(e);process.exitCode=1;});

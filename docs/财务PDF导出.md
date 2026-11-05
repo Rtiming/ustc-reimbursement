@@ -1,11 +1,11 @@
 # 财务接口与文件导出
 
-审批后正式打印已提供`workflow --case-id 本批 --phase print --output-root /授权资料/正式打印`，默认预览。`--merge-pdf/--no-merge-pdf`和`--finance-only/--no-finance-only`独立，缺省false/true；`--execute`才开始。MCP为`reimbursement_print_batch`，返回job_id后查result。正式打印直接调用固定学校HTTP接口，不模拟点击；其他历史页面适配器不表示已经迁移。登记工作页目前仍限Mac原生桥，Windows现场批次接入未验收。
+审批后正式打印已提供`workflow --case-id 本批 --phase print --output-root /授权资料/正式打印`，默认预览。`--merge-pdf/--no-merge-pdf`和`--finance-only/--no-finance-only`独立，缺省false/true；`--execute`才开始。MCP为`reimbursement_print_batch`，返回job_id后查result。正式打印直接调用固定学校HTTP接口，不模拟点击；其他历史页面适配器不表示已经迁移。登记工作页共用Mac/Windows原生桥；入口和验收边界见[Windows适配与功能验收](Windows适配与功能验收.md)。
 
 当前基本信息、经费、预算、支付、说明、预审、普通建单、原件上传、异常清理、医疗自费和单段行程维护已有固定HTTP适配及独立回读合同，具体限制由能力目录返回。新增对公身份及单笔公务卡选择有合成验证，真实有变更保存仍待对应样本验收；其他写业务继续由迁移策略阻止旧点击路径。`access check-backend`只读验证固定后端或首页YBX入口，登记会话开始前自动使用。接口不可用时不自动换报账项目、不重试写入。详细参数和恢复见包内`docs/底层业务接口.md`，能力目录以同一实现返回的状态为准。
 
 
-本适配器面向中国科大当前网页结构，需要本人账号、学校网络和本机Edge。安装及离线合成自检不证明网页接线、登录或真实财务写入已完成。Linux不提供财务网页操作，Windows整批测试版已接同一接口，但真实财务流程尚未实测；按docs/整批流程与登记.md完成当前设备与明确授权业务的验收前，不应据此认定生产可用。
+本适配器面向中国科大当前网页结构，需要本人账号、学校网络和本机Edge。安装及离线合成自检不证明网页接线、登录或真实财务写入已完成。Linux不提供财务网页操作，Windows已接同一接口，旧版已有现场办理记录；本版精确包与每台设备仍须分别验收，按docs/整批流程与登记.md完成当前设备与明确授权业务的验收前，不应据此认定生产可用。
 
 ## 本机接线
 

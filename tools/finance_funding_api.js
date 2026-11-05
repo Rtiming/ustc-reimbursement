@@ -28,7 +28,10 @@ async function reimbursementFundingBuild(c) {
   if(rows.some(r=>r['t.select_flag']==='已选' && !codes.includes(r['t.uni_prj_code']))) throw Error('FUNDING_API_EXTRA_SELECTION');
   const candidates=[];
   for(const f of c.funding){
-    const matches=rows.filter(r=>r['t.uni_prj_code']===f.code);
+    const byCode=rows.filter(r=>r['t.uni_prj_code']===f.code);
+    const matches=f.owner_name ? byCode.filter(r=>typeof r['t.CHARGE_NAME']==='string' &&
+      r['t.CHARGE_NAME'].split(/[,，]/).map(s=>s.trim()).includes(f.owner_name)) : byCode;
+    if(byCode.length && !matches.length) throw Error('FUNDING_API_OWNER_BINDING');
     if(!matches.length){
       const other=definition.funcs.find(q=>String(q.funcno)==='243'),field=other?.formFields.find(q=>q.fieldname==='t.proj_code');
       if(!field?.Events?.[0]?.proc?.startsWith('$d572d69025d7eda5495af21191ca9f30|'))throw Error('FUNDING_API_OTHER_QUERY_CHANGED');
